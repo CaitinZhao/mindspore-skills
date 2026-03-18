@@ -1,0 +1,44 @@
+schema_version: "1.0.0"
+name: "failure-agent"
+display_name: "Failure Agent"
+description: "Diagnose MindSpore and PTA (PyTorch + torch_npu) crashes, runtime errors, hangs, and communication failures."
+version: "0.3.0"
+
+entry:
+  type: "manual"
+  path: "SKILL.md"
+
+inputs:
+  - name: "user_problem"
+    type: "string"
+    required: true
+    description: "Problem description, symptom, and command context."
+  - name: "error_log"
+    type: "string"
+    required: false
+    description: "Error log or traceback to diagnose."
+  - name: "environment"
+    type: "string"
+    required: false
+    description: "Runtime environment details (versions, backend, device, mode)."
+
+outputs:
+  report_schema: "skills/_shared/contract/report.schema.json"
+  out_dir_layout: "runs/<run_id>/out/"
+
+permissions:
+  network: "none"
+  filesystem: "workspace-write"
+
+dependencies:
+  tools:
+    - "bash"
+    - "rg"
+  python: []
+
+tags:
+  - "mindspore"
+  - "pta"
+  - "torch_npu"
+  - "diagnosis"
+  - "failure"

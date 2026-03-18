@@ -1,57 +1,62 @@
 {
-  "name": "mindspore-skills",
-  "description": "MindSpore operator development and model migration skills",
-  "version": "1.1.0",
-  "skills": [
-    {
-      "name": "api-helper",
-      "description": "Find API call chains and operator wiring in MindSpore codebase",
-      "path": "skills/api-helper/SKILL.md"
-    },
-    {
-      "name": "cpu-plugin-builder",
-      "description": "Build CPU operators via ATen/libtorch adaptation",
-      "path": "skills/cpu-plugin-builder/SKILL.md"
-    },
-    {
-      "name": "cpu-native-builder",
-      "description": "Build native CPU kernels with Eigen/SLEEF",
-      "path": "skills/cpu-native-builder/SKILL.md"
-    },
-    {
-      "name": "gpu-builder",
-      "description": "Build GPU operators with CUDA",
-      "path": "skills/gpu-builder/SKILL.md"
-    },
-    {
-      "name": "npu-builder",
-      "description": "Build NPU operators for Huawei Ascend",
-      "path": "skills/npu-builder/SKILL.md"
-    },
-    {
-      "name": "mindspore-aclnn-operator-devflow",
-      "description": "End-to-end ACLNN operator adaptation workflow for MindSpore Ascend",
-      "path": "skills/mindspore-aclnn-operator-devflow/SKILL.md"
-    },
-    {
-      "name": "hf-diffusers-migrate",
-      "description": "Migrate HF diffusers models to mindone.diffusers",
-      "path": "skills/hf-diffusers-migrate/SKILL.md"
-    },
-    {
-      "name": "hf-transformers-migrate",
-      "description": "Migrate Hugging Face transformers models to mindone.transformers",
-      "path": "skills/hf-transformers-migrate/SKILL.md"
-    },
-    {
-      "name": "hf-transformers-migrate-test",
-      "description": "Generate minimal MindOne transformer tests for migrated models",
-      "path": "skills/hf-transformers-migrate-test/SKILL.md"
-    },
-    {
-      "name": "model-migrate",
-      "description": "Migrate PyTorch repos to MindSpore",
-      "path": "skills/model-migrate/SKILL.md"
-    }
-  ]
+    "name":  "mindspore-skills",
+    "description":  "MindSpore operator development and model migration skills",
+    "version":  "1.1.0",
+    "skills":  [
+                   {
+                       "name":  "api-helper",
+                       "description":  "Find API call chains and operator wiring in MindSpore codebase",
+                       "path":  "skills/api-helper/SKILL.md"
+                   },
+                   {
+                       "name":  "cpu-plugin-builder",
+                       "description":  "Build CPU operators via ATen/libtorch adaptation",
+                       "path":  "skills/cpu-plugin-builder/SKILL.md"
+                   },
+                   {
+                       "name":  "cpu-native-builder",
+                       "description":  "Build native CPU kernels with Eigen/SLEEF",
+                       "path":  "skills/cpu-native-builder/SKILL.md"
+                   },
+                   {
+                       "name":  "gpu-builder",
+                       "description":  "Build GPU operators with CUDA",
+                       "path":  "skills/gpu-builder/SKILL.md"
+                   },
+                   {
+                       "name":  "npu-builder",
+                       "description":  "Build NPU operators for Huawei Ascend",
+                       "path":  "skills/npu-builder/SKILL.md"
+                   },
+                   {
+                       "name":  "mindspore-aclnn-operator-devflow",
+                       "description":  "End-to-end ACLNN operator adaptation workflow for MindSpore Ascend",
+                       "path":  "skills/mindspore-aclnn-operator-devflow/SKILL.md"
+                   },
+                   {
+                       "name":  "hf-diffusers-migrate",
+                       "description":  "Migrate HF diffusers models to mindone.diffusers",
+                       "path":  "skills/hf-diffusers-migrate/SKILL.md"
+                   },
+                   {
+                       "name":  "hf-transformers-migrate",
+                       "description":  "Migrate Hugging Face transformers models to mindone.transformers",
+                       "path":  "skills/hf-transformers-migrate/SKILL.md"
+                   },
+                   {
+                       "name":  "hf-transformers-migrate-test",
+                       "description":  "Generate minimal MindOne transformer tests for migrated models",
+                       "path":  "skills/hf-transformers-migrate-test/SKILL.md"
+                   },
+                   {
+                       "name":  "model-migrate",
+                       "description":  "Migrate PyTorch repos to MindSpore",
+                       "path":  "skills/model-migrate/SKILL.md"
+                   },
+                   {
+                       "name":  "failure-agent",
+                       "description":  "Diagnose MindSpore and PTA (torch_npu) runtime failures",
+                       "path":  "skills/failure-agent/SKILL.md"
+                   }
+               ]
 }

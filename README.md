@@ -211,3 +211,15 @@ tools:
 ## License
 
 Apache 2.0
+
+## Additional Skills
+
+| Skill | Description |
+|-------|-------------|
+| `failure-agent` | Diagnose MindSpore and PTA (torch_npu) runtime failures |
+
+## Additional Commands
+
+| Command | Description |
+|---------|-------------|
+| `/failure-agent` | Dual-stack failure diagnosis workflow (MindSpore + PTA) |

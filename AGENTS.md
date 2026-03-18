@@ -60,3 +60,12 @@ This repository works with:
 - **OpenCode**: Clone to `~/.config/opencode/` or `.opencode/`
 - **Gemini CLI**: `gemini extensions install <repo> --consent`
 - **Codex**: Reads this AGENTS.md automatically
+
+## Additional Skills
+
+| Skill | Path | Description |
+|-------|------|-------------|
+| failure-agent | skills/failure-agent/ | diagnose MindSpore and PTA (torch_npu) runtime failures |
+
+**Additional Activation Hints:**
+- **failure-agent**: "failure", "crash", "hang", "traceback", "ERR code", "CANN", "ACLNN", "torch_npu", "MindSpore error"
