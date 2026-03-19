@@ -1,0 +1,50 @@
+schema_version: "1.1.0"
+name: "setup-agent"
+display_name: "Setup Agent"
+description: "Validate and fix the runtime environment for Ascend NPU (driver ↔ CANN ↔ MindSpore) or Nvidia GPU (driver ↔ CUDA ↔ PyTorch) workloads, with HuggingFace dependency checks and auto-fix."
+version: "0.2.0"
+
+entry:
+  type: "manual"
+  path: "SKILL.md"
+
+role: "agent"
+
+composes:
+  - "compile-linux-cpu"
+  - "compile-macos"
+
+factory:
+  card_types: []
+
+inputs:
+  - name: "target"
+    type: "enum"
+    required: false
+    default: "local"
+    choices: ["local", "remote"]
+    description: "Whether the target environment is local or remote."
+
+outputs:
+  report_schema: "skills/_shared/contract/report.schema.json"
+  out_dir_layout: "runs/<run_id>/out/"
+
+permissions:
+  network: "optional"
+  filesystem: "read"
+
+dependencies:
+  tools:
+    - "bash"
+  python: []
+
+tags:
+  - "mindspore"
+  - "pytorch"
+  - "ascend"
+  - "nvidia"
+  - "cuda"
+  - "cann"
+  - "environment"
+  - "setup"
+  - "huggingface"
