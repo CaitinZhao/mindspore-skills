@@ -10,7 +10,7 @@
     {
       "id": 2,
       "prompt": "Inference latency on Ascend is too high even though utilization looks low. I want a practical diagnosis path that checks whether the issue is host launch overhead, graph build overhead, or compute kernels. Please tell me what `msprof` evidence to collect and how to compare before and after.",
-      "expected_output": "Prioritizes Ascend profiling evidence, uses `msprof` as the collection path, distinguishes host launch versus graph versus compute bottlenecks, avoids jumping straight to generic tips, and requires a before/after rerun comparison.",
+      "expected_output": "Prioritizes Ascend profiling evidence, uses the official framework profiler API as the collection entry point, prefers copying the Python entry script to a `*-perf.py` sibling instead of editing the original script, distinguishes host launch versus graph versus compute bottlenecks, avoids jumping straight to generic tips, and requires a before/after rerun comparison.",
       "files": []
     },
     {
@@ -45,7 +45,7 @@
     },
     {
       "id": 8,
-      "prompt": "I used `msprof` to rerun the Ascend task and now I have an operator time table sorted from large to small. Please summarize the top hotspots, give me a priority list, and tell me why I should solve the highest-cost operators first.",
+      "prompt": "I copied my training script to `train-perf.py`, collected Ascend profiling data, and now I have an operator time table sorted from large to small. Please summarize the top hotspots, give me a priority list, and tell me why I should solve the highest-cost operators first.",
       "expected_output": "Consumes the msprof hotspot output as a priority signal, summarizes the top time-consuming operators, orders optimization work from highest-cost to lowest-cost, and avoids spreading attention evenly across low-impact operators.",
       "files": []
     },
@@ -53,6 +53,48 @@
       "id": 9,
       "prompt": "The `hotspot_summary.json` shows one operator far ahead of the rest and two smaller follow-ups. I want a practical optimization queue: tell me why the top operator is first, what kind of bottleneck it likely represents, and what rerun evidence should improve before I touch the lower-ranked operators.",
       "expected_output": "Uses the hotspot summary as the main prioritization signal, focuses on top1-top3 rather than the long tail, explains why the leading operator is first, maps it to a bottleneck family, and ties the suggested optimization order to rerun evidence.",
+      "files": []
+    },
+    {
+      "id": 10,
+      "prompt": "I need to collect profiler data for a MindSpore training script on Ascend. Please tell me the safest way to automate it without editing the original script.",
+      "expected_output": "Prefers copying the real Python training entry script to a `*-perf.py` sibling, keeps the original script untouched, initializes `mindspore.profiler.profile(...)` before training, uses the documented MindSpore schedule defaults, asks for the resulting `msprof_*_ascend_ms` artifacts, and does not default to wrapping the original command in an external `msprof` launcher.",
+      "files": []
+    },
+    {
+      "id": 11,
+      "prompt": "For a torch_npu training loop on Ascend, I want automated profiler collection but I do not want to modify the original script in place. What collection path should we use?",
+      "expected_output": "Prefers copying the real Python training entry script to a `*-perf.py` sibling, keeps the original script untouched, uses `torch_npu.profiler.profile(...)` with the documented defaults, asks for the resulting `msprof_*_ascend_pt` artifacts, and does not default to wrapping the original command in an external `msprof` launcher.",
+      "files": []
+    },
+    {
+      "id": 12,
+      "prompt": "I already have the full Ascend trace export directory and a timeline screenshot for my MindSpore run. Do not tell me how to collect data again. Read this as a trace-first diagnosis problem.",
+      "expected_output": "Routes directly to trace intake and bottleneck classification, asks only for the smallest missing trace artifact if needed, and does not restart with fresh collection guidance.",
+      "files": []
+    },
+    {
+      "id": 13,
+      "prompt": "My MindSpore training script only calls model.train(...) and hides the actual loop. I still want profiler collection through a copied train-perf.py. Can your helper inject that automatically?",
+      "expected_output": "Refuses automatic injection for the non-explicit-loop MindSpore case, explains that supported automatic injection is limited to explicit loops, and guides the user to modify the copied script manually rather than guessing an insertion point.",
+      "files": []
+    },
+    {
+      "id": 14,
+      "prompt": "Please use collect_msprof.sh to duplicate my torch_npu entry script and rerun it automatically with profiler hooks already injected.",
+      "expected_output": "Describes collect_msprof.sh as scaffold-only unless a real injector is implemented in the current environment, avoids claiming that it can already inject or rerun automatically, and keeps the guidance within current supported capability.",
+      "files": []
+    },
+    {
+      "id": 15,
+      "prompt": "My Ascend job crashes before the first step with an unsupported operator error. Use performance-agent and also tell me how to collect profiler data later.",
+      "expected_output": "Rejects the crash or unsupported-op failure as a performance-agent entry point, redirects to the appropriate failure or operator workflow first, and does not start the performance workflow prematurely.",
+      "files": []
+    },
+    {
+      "id": 16,
+      "prompt": "I have a MindSpore profiler export directory, but I do not want to upload the whole thing. Tell me which files are highest-signal for finding whether the bottleneck is step breakdown, hot operators, timeline gaps, communication, memory, or dataset stall.",
+      "expected_output": "Uses the profiler output layout to prioritize a small set of high-signal files, recommends step_trace_time.csv, kernel_details.csv, trace_view.json, communication files, memory files, or dataset files based on the symptom, and avoids asking for the whole export directory up front.",
       "files": []
     }
   ]
