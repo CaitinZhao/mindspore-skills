@@ -1,8 +1,8 @@
 schema_version: "1.0.0"
 name: "failure-agent"
 display_name: "Failure Agent"
-description: "Diagnose MindSpore and PTA (PyTorch + torch_npu) crashes, runtime errors, hangs, and communication failures."
-version: "0.3.0"
+description: "Diagnose MindSpore and PTA (PyTorch + torch_npu) crashes, runtime errors, hangs, and communication failures with evidence-first triage, ordered knowledge lookup, and manual-only report candidates."
+version: "0.5.13"
 
 entry:
   type: "manual"
@@ -21,6 +21,10 @@ inputs:
     type: "string"
     required: false
     description: "Runtime environment details (versions, backend, device, mode)."
+  - name: "factory_root"
+    type: "path"
+    required: false
+    description: "Explicit Factory root path for direct read access to cards."
 
 outputs:
   report_schema: "skills/_shared/contract/report.schema.json"
