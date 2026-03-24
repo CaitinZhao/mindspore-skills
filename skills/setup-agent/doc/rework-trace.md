@@ -688,6 +688,166 @@ pytest -q skills/setup-agent/tests
 Result at completion:
 - `14 passed`
 
+## Change Log Updates
+
+### 2026-03-24 - CANN-matched framework validation and remediation
+
+Trigger:
+- The framework layer needed to be driven by the detected CANN version instead
+  of only broad framework-version buckets.
+- PTA compatibility needed to stay local-first while allowing remote fallback
+  to the upstream `Ascend/pytorch` README for unknown tuples.
+- Installed incompatible `mindspore` or PTA packages needed an explicit
+  replacement path rather than only pass/fail classification.
+
+Files changed:
+
+1. `skills/setup-agent/SKILL.md`
+   - Description: Main execution prompt used by the model
+   - Change:
+     - Added CANN-first framework resolution flow in Gate 5
+     - Added confirmation policy for framework replacement
+     - Clarified that compatible replacement versions should be derived before
+       replacing installed framework packages
+
+2. `skills/setup-agent/references/ascend-compat.md`
+   - Description: Compatibility lookup and repair policy
+   - Change:
+     - Added `Compatibility Source Policy`
+     - Added `Framework Package Remediation Policy`
+     - Reworked PTA compatibility from coarse `2.x` rows to exact CANN-keyed
+       tuples
+     - Added local PTA rows for `2.6.0`, `2.7.1`, `2.8.0`, and `2.9.0`
+     - Restricted CANN download guidance to missing driver or toolkit, rather
+       than missing framework packages
+
+3. `skills/setup-agent/references/execution-contract.md`
+   - Description: Runtime UX and reporting contract
+   - Change:
+     - Added reporting requirements for detected CANN, framework compatibility
+       reasoning, recommended replacement versions, and confirmed replacement
+       actions
+
+4. `skills/setup-agent/skill.yaml`
+   - Description: Skill manifest
+   - Change:
+     - Bumped the skill version as the framework compatibility contract
+       expanded
+
+5. `skills/setup-agent/tests/test_references.py`
+   - Description: Behavior-contract tests for the skill prompt and references
+   - Change:
+     - Added regression checks for exact PTA compatibility rows, replacement
+       guidance, and CANN-first framework resolution
+
+### 2026-03-24 - Direct uv install path for missing frameworks and dependencies
+
+Trigger:
+- Missing `mindspore`, `torch`, or `torch_npu` should no longer redirect users
+  to the CANN download portal for framework installation.
+- When framework import or smoke checks fail because of missing Python
+  packages, the skill should repair that state directly inside the selected
+  `uv` environment when the missing package can be identified safely.
+
+Files changed:
+
+1. `skills/setup-agent/SKILL.md`
+   - Description: Main execution prompt used by the model
+   - Change:
+     - Changed missing-framework handling to direct `pip install` inside the
+       selected `uv` environment
+     - Added direct dependency remediation for framework imports and smoke
+       tests
+     - Clarified that package names must not be guessed when the import error
+       is ambiguous
+
+2. `skills/setup-agent/references/execution-contract.md`
+   - Description: Runtime UX and reporting contract
+   - Change:
+     - Added required reporting for direct `pip install` remediation inside the
+       selected `uv` environment
+     - Added explicit reporting for Python packages installed to recover
+       failed framework imports or smoke tests
+
+3. `skills/setup-agent/tests/test_references.py`
+   - Description: Behavior-contract tests for the skill prompt and references
+   - Change:
+     - Added assertions for direct framework installation in `uv`
+     - Added assertions for missing dependency remediation and the
+       non-guessing rule for ambiguous import failures
+
+### 2026-03-24 - Skill structure refactor to thin SKILL plus references and helper script
+
+Trigger:
+- `SKILL.md` had grown too large and was mixing orchestration, lookup-heavy
+  rules, and command details in one file.
+- The target shape for commercial-grade maintenance was a thin execution prompt
+  with deeper references and a deterministic helper for PTA compatibility
+  lookup.
+
+Files changed:
+
+1. `skills/setup-agent/SKILL.md`
+   - Description: Main execution prompt used by the model
+   - Change:
+     - Reduced the prompt from 491 lines to about 310 lines
+     - Kept scope, confirmation policy, gate ordering, and stop conditions in
+       the prompt
+     - Moved Gate 5 and Gate 7 detail out to dedicated references
+     - Added explicit navigation to the new references and helper script
+
+2. `skills/setup-agent/references/framework-remediation.md`
+   - Description: New framework-layer execution reference
+   - Change:
+     - Added as the owner of framework install, replacement, PTA fallback,
+       dependency remediation, and runtime dependency checks
+
+3. `skills/setup-agent/references/workspace-discovery.md`
+   - Description: New workspace-layer execution reference
+   - Change:
+     - Added as the owner of local model discovery, Hugging Face download,
+       training script discovery, and checkpoint discovery rules
+
+4. `skills/setup-agent/scripts/pta_compat_lookup.py`
+   - Description: Deterministic PTA compatibility lookup helper
+   - Change:
+     - Added local-table parsing
+     - Added optional remote fallback parsing against the upstream
+       `Ascend/pytorch` README
+     - Added normalized query handling for `torch`, `torch_npu`, and Python
+       version filtering
+
+5. `skills/setup-agent/tests/test_references.py`
+   - Description: Behavior-contract tests for the skill prompt and references
+   - Change:
+     - Reoriented assertions so `SKILL.md` is tested as an orchestrator rather
+       than the owner of every detailed rule
+     - Added structural tests for the new references and helper script
+     - Added a size guard to keep `SKILL.md` compact after the refactor
+
+6. `skills/setup-agent/skill.yaml`
+   - Description: Skill manifest
+   - Change:
+     - Bumped the version to `0.6.0` after the structural refactor
+
+7. `skills/setup-agent/doc/rework-trace.md`
+   - Description: Long-lived trace for the skill's rework history
+   - Change:
+     - Renamed from `rework-trace-2026-03-20.md` to `rework-trace.md`
+     - Updated to include all 2026-03-24 changes in the running trace
+
+## Latest Validation Snapshot
+
+Validation performed after the 2026-03-24 refactor:
+
+```bash
+python -m py_compile skills/setup-agent/scripts/pta_compat_lookup.py
+python -m pytest skills/setup-agent/tests/test_references.py skills/setup-agent/tests/test_manifest_contract.py
+```
+
+Result:
+- `45 passed`
+
 ## Practical Guidance For Future Editors
 
 When updating `setup-agent` later, keep these boundaries unless there is a

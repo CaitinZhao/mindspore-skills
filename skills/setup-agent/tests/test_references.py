@@ -1,4 +1,3 @@
-import re
 from pathlib import Path
 
 import yaml
@@ -6,6 +5,7 @@ import yaml
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 REFERENCES_DIR = SKILL_ROOT / "references"
+SCRIPTS_DIR = SKILL_ROOT / "scripts"
 SKILL_MD = SKILL_ROOT / "SKILL.md"
 SKILL_YAML = SKILL_ROOT / "skill.yaml"
 ROOT_AGENTS = SKILL_ROOT.parents[1] / "AGENTS.md"
@@ -19,11 +19,19 @@ def read_yaml(path: Path):
     return yaml.safe_load(read_text(path))
 
 
-def test_skill_references_only_ascend_compat():
+def test_skill_md_stays_compact_after_refactor():
+    lines = read_text(SKILL_MD).splitlines()
+    assert len(lines) <= 360
+
+
+def test_skill_references_required_files():
     content = read_text(SKILL_MD)
     assert "references/ascend-compat.md" in content
+    assert "references/framework-remediation.md" in content
+    assert "references/workspace-discovery.md" in content
     assert "references/nvidia-compat.md" not in content
     assert "references/execution-contract.md" in content
+    assert "scripts/pta_compat_lookup.py" in content
 
 
 def test_ascend_reference_exists_and_has_required_sections():
@@ -31,15 +39,37 @@ def test_ascend_reference_exists_and_has_required_sections():
     content = read_text(path)
     assert path.exists()
     assert "Driver / Firmware / CANN Matrix" in content
+    assert "Compatibility Source Policy" in content
     assert "MindSpore on Ascend" in content
     assert "PyTorch + torch_npu on Ascend" in content
+    assert "Local PTA Compatibility Table" in content
     assert "Official Installation Guides" in content
 
 
-def test_ascend_reference_has_torch_npu_rows():
+def test_ascend_reference_has_exact_pta_rows_for_26_to_29():
     content = read_text(REFERENCES_DIR / "ascend-compat.md")
-    rows = re.findall(r"^\|\s*2\.\d+\.x\s*\|\s*2\.\d+\.x\s*\|", content, re.MULTILINE)
-    assert len(rows) >= 3, f"Expected >=3 torch/torch_npu matrix rows, found {len(rows)}"
+    assert "| 8.5.0 | 2.9.0 | 2.9.0 |" in content
+    assert "| 8.5.0 | 2.8.0 | 2.8.0.post2 | 3.9-3.11 | v2.8.0-7.3.0 |" in content
+    assert "| 8.5.0 | 2.7.1 | 2.7.1.post2 | 3.9-3.11 | v2.7.1-7.3.0 |" in content
+    assert "| 8.5.0 | 2.6.0 | 2.6.0.post5 | 3.9-3.11 | v2.6.0-7.3.0 |" in content
+
+
+def test_ascend_reference_documents_pta_lookup_order_and_remote_fallback():
+    content = read_text(REFERENCES_DIR / "ascend-compat.md")
+    assert "1. `Local PTA Compatibility Table`" in content
+    assert "2. upstream `Ascend/pytorch` README remote fallback" in content
+    assert "3. if still unresolved, mark the tuple `WARN` and stop PTA auto-remediation" in content
+    assert "do not mutate this local reference file during a normal `setup-agent` run" in content
+    assert "verify the current PTA release" in content
+    assert "notes before installation" in content
+
+
+def test_ascend_reference_documents_mindspore_replacement_guidance():
+    content = read_text(REFERENCES_DIR / "ascend-compat.md")
+    assert "Recommended Replacement" in content
+    assert "if the installed MindSpore version is incompatible but a compatible local" in content
+    assert "replacement can be derived, recommend replacement inside the selected `uv`" in content
+    assert "installed version incompatible but replacement available locally" in content
 
 
 def test_execution_reference_exists_and_has_required_sections():
@@ -49,6 +79,37 @@ def test_execution_reference_exists_and_has_required_sections():
     assert "Streaming Console Output" in content
     assert "Console Contract" in content
     assert "Final Mailbox Summary" in content
+
+
+def test_framework_remediation_reference_exists_and_has_required_sections():
+    path = REFERENCES_DIR / "framework-remediation.md"
+    content = read_text(path)
+    assert path.exists()
+    assert "## Framework Resolution Order" in content
+    assert "## MindSpore Path" in content
+    assert "## PTA Path" in content
+    assert "## Replacement Policy" in content
+    assert "## Runtime Dependency Checks" in content
+
+
+def test_workspace_discovery_reference_exists_and_has_required_sections():
+    path = REFERENCES_DIR / "workspace-discovery.md"
+    content = read_text(path)
+    assert path.exists()
+    assert "## Model-First Policy" in content
+    assert "### Find local model directories" in content
+    assert "### Download only when no local model directory is selected" in content
+    assert "## Script and Checkpoint Discovery" in content
+
+
+def test_pta_lookup_script_exists():
+    path = SCRIPTS_DIR / "pta_compat_lookup.py"
+    content = read_text(path)
+    assert path.exists()
+    assert "REMOTE_README" in content
+    assert "parse_local_table" in content
+    assert "parse_remote_table" in content
+    assert "--remote-fallback" in content
 
 
 def test_skill_no_longer_mentions_gpu_or_nvidia_path():
@@ -66,6 +127,18 @@ def test_skill_requires_uv_before_python_installs():
     assert "Never install Python packages into the system interpreter." in content
     assert "`uv` is healthy only when both `command -v uv` and `uv --version` succeed." in content
     assert "Do not maintain step-by-step run logs during environment checking." in content
+
+
+def test_skill_has_explicit_confirmation_policy():
+    content = read_text(SKILL_MD)
+    assert "## Confirmation Policy" in content
+    assert "- installing `uv`" in content
+    assert "- creating a new `uv` environment" in content
+    assert "- replacing an already installed `mindspore`, `torch`, or `torch_npu`" in content
+    assert "- downloading a model from Hugging Face" in content
+    assert "After the user has confirmed the target `uv` environment, you MAY do these" in content
+    assert "- install a missing `mindspore` package inside that environment" in content
+    assert "- install missing runtime Python dependencies inside that environment" in content
 
 
 def test_skill_uses_current_path_as_default_workdir():
@@ -121,26 +194,37 @@ def test_skill_skips_driver_and_cann_checks_when_no_npu_is_detected():
     assert "- skip later driver and CANN checks" in content
 
 
-def test_skill_points_missing_ascend_components_to_hiascend_download_portal():
+def test_skill_points_missing_system_components_to_hiascend_download_portal():
     skill_content = read_text(SKILL_MD)
     ref_content = read_text(REFERENCES_DIR / "ascend-compat.md")
     url = "https://www.hiascend.com/cann/download"
     assert url in skill_content
     assert url in ref_content
-    assert "If MindSpore is missing:" in skill_content
-    assert "If `torch` or `torch_npu` is missing:" in skill_content
+
+
+def test_skill_installs_missing_frameworks_inside_uv():
+    content = read_text(REFERENCES_DIR / "framework-remediation.md")
+    assert "Missing package handling:" in content
+    assert "`pip install mindspore==<resolved_version>`" in content
+    assert "`pip install torch==<resolved_torch>`" in content
+    assert "`pip install torch_npu==<resolved_torch_npu>`" in content
 
 
 def test_skill_uses_task_type_to_gate_runtime_checks():
-    content = read_text(SKILL_MD)
+    content = read_text(REFERENCES_DIR / "framework-remediation.md")
     assert "are standard runtime checks" in content
     assert "`transformers`, `tokenizers`, `datasets`, `accelerate`, and `safetensors`" in content
     assert "require `diffusers` when `task_type=diffusion`" in content
+    assert "install missing runtime dependencies directly inside the selected `uv`" in content
+    assert "`ModuleNotFoundError` or" in content
+    assert "`ImportError` for an installable Python package" in content
+    assert "`pip install <package>`" in content
 
 
 def test_skill_adds_model_first_workdir_artifact_phase():
-    content = read_text(SKILL_MD)
-    assert "## Gate 7. Model-First Workspace Checks" in content
+    skill_content = read_text(SKILL_MD)
+    content = read_text(REFERENCES_DIR / "workspace-discovery.md")
+    assert "## Gate 7. Model-First Workspace Checks" in skill_content
     assert "Always look for existing local model directories before" in content
     assert "candidate model" in content
     assert "directories exist" in content
@@ -154,7 +238,7 @@ def test_skill_adds_model_first_workdir_artifact_phase():
 
 
 def test_skill_uses_snapshot_download_when_no_local_model_directory_exists():
-    content = read_text(SKILL_MD)
+    content = read_text(REFERENCES_DIR / "workspace-discovery.md")
     assert "If no candidate model directory exists, or the user declines all candidates:" in content
     assert "- ask the user which Hugging Face model to download" in content
     assert "use `huggingface_hub.snapshot_download` inside the selected `uv` environment" in content
@@ -171,7 +255,7 @@ def test_skill_uses_snapshot_download_when_no_local_model_directory_exists():
 
 
 def test_skill_checks_training_scripts_and_checkpoints_after_model_selection():
-    content = read_text(SKILL_MD)
+    content = read_text(REFERENCES_DIR / "workspace-discovery.md")
     assert '-iname "train*.py"' in content
     assert '-iname "finetune*.py"' in content
     assert '-iname "run*.py"' in content
@@ -188,14 +272,14 @@ def test_skill_checks_training_scripts_and_checkpoints_after_model_selection():
 
 
 def test_skill_classifies_workspace_artifacts_by_task_type():
-    content = read_text(SKILL_MD)
+    content = read_text(REFERENCES_DIR / "workspace-discovery.md")
     assert "if `task_type=training`, training script check is `PASS`" in content
     assert "if `task_type=inference`, missing training scripts are `INFO` rather" in content
     assert "candidate training entry scripts exist" in content
 
 
 def test_skill_guides_huggingface_download_when_artifacts_are_missing():
-    content = read_text(SKILL_MD)
+    content = read_text(REFERENCES_DIR / "workspace-discovery.md")
     assert "do not reclassify the Ascend driver/CANN/framework setup as failed" in content
     assert "ask the user which Hugging Face model to download" in content
     assert "tell the user exactly which artifacts are absent" in content
@@ -207,6 +291,50 @@ def test_skill_reports_both_framework_paths():
     assert "### MindSpore path" in content
     assert "### PTA path (`torch` + `torch_npu`)" in content
     assert "If both framework paths are unhealthy, report both independently" in content
+
+
+def test_skill_uses_cann_first_framework_resolution():
+    skill_content = read_text(SKILL_MD)
+    content = read_text(REFERENCES_DIR / "framework-remediation.md")
+    assert "Load `references/framework-remediation.md` before changing framework" in skill_content
+    assert "Treat the detected CANN version as the primary selector for" in content
+    assert "1. Detect the current CANN version from the system-layer evidence" in content
+    assert "2. Detect the selected `uv` environment Python version" in content
+    assert "3. Resolve compatible framework candidates from" in content
+    assert "`references/ascend-compat.md`" in content
+    assert "4. For PTA only, if the local table does not classify the tuple, prefer the" in content
+    assert "5. Compare the installed framework version against the compatible candidate set" in content
+    assert "6. Run the framework smoke test only after compatibility classification" in content
+    assert "For each framework path, use this remediation order:" in content
+    assert "1. Resolve the compatible target version from the detected CANN version and the" in content
+    assert "4. If the framework is installed but incompatible, ask for confirmation before" in content
+
+
+def test_skill_documents_framework_replacement_after_confirmation():
+    content = read_text(REFERENCES_DIR / "framework-remediation.md")
+    assert "ask for confirmation before replacing the package inside the selected `uv`" in content
+    assert "ask for confirmation before replacing PTA packages inside the selected `uv`" in content
+    assert "never replace packages without user confirmation" in content
+    assert "recreate the `uv` environment with a compatible Python version" in content
+    assert "print the detected CANN version, current PTA tuple, and the recommended" in content
+    assert "compatible tuple" in content
+
+
+def test_skill_classifies_unknown_pta_after_remote_fallback_as_warn():
+    content = read_text(REFERENCES_DIR / "framework-remediation.md")
+    assert "If the exact PTA tuple remains unresolved after local and remote lookup:" in content
+    assert "- classify the PTA path as `WARN`" in content
+    assert "- do not auto-remediate PTA packages" in content
+    assert "verify the current PTA release notes before installing or" in content
+
+
+def test_skill_installs_missing_python_deps_during_framework_checks():
+    content = read_text(REFERENCES_DIR / "framework-remediation.md")
+    assert "if the import or smoke test fails because a Python package is missing:" in content
+    assert "if the missing package name is clear from the error, install it directly" in content
+    assert "if the package name cannot be identified with high confidence, stop and" in content
+    assert "re-run the failed check before classifying the MindSpore path" in content
+    assert "re-run the failed PTA check before classifying the framework path" in content
 
 
 def test_skill_documents_console_only_contract():
@@ -231,6 +359,32 @@ def test_skill_documents_console_only_contract():
     assert "- matched checkpoint paths" in content
     assert "- China mirror fallback guidance using `HF_ENDPOINT=https://hf-mirror.com`" in content
     assert "- download/auth failure reason" in content
+    assert "- detected CANN version used for framework compatibility resolution" in content
+    assert "- framework compatibility reasoning" in content
+    assert "- recommended compatible version(s)" in content
+    assert "- whether a replacement was offered and whether the user confirmed it" in content
+    assert "- direct `pip install` remediation inside the selected `uv` environment" in content
+    assert "- Python packages installed to recover a failed framework import or smoke test" in content
+    assert "- framework package installs or replacements performed inside the selected `uv`" in content
+    assert "driver or" in content
+    assert "toolkit is missing" in content
+
+
+def test_ascend_reference_limits_cann_download_guidance_to_system_layer():
+    content = read_text(REFERENCES_DIR / "ascend-compat.md")
+    assert "If the Ascend driver or toolkit is missing" in content
+    assert "If the Ascend driver, framework, or toolkit is missing" not in content
+    assert "## Framework Package Remediation Policy" in content
+    assert "install the compatible version resolved" in content
+    assert "report the unresolved package name instead of guessing" in content
+
+
+def test_skill_moves_workspace_and_framework_detail_out_of_skill_md():
+    content = read_text(SKILL_MD)
+    assert "Load `references/framework-remediation.md`" in content
+    assert "Load `references/workspace-discovery.md`" in content
+    assert '`pip install torch==<resolved_torch>`' not in content
+    assert 'find "<selected_model_dir>" -type f' not in content
 
 
 def test_skill_requires_streaming_console_output():

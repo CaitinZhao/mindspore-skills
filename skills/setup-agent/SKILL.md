@@ -13,6 +13,10 @@ report.
 
 Load these references when needed:
 - `references/ascend-compat.md` for compatibility and repair order
+- `references/framework-remediation.md` for framework install, replacement, and
+  dependency remediation
+- `references/workspace-discovery.md` for model, script, and checkpoint
+  discovery
 - `references/execution-contract.md` for streaming output and report shape
 
 ## Hard Rules
@@ -37,6 +41,23 @@ Load these references when needed:
 - Do not maintain step-by-step run logs during environment checking.
 - Reflect newly installed or repaired components only in the final
   `env_summary`.
+
+## Confirmation Policy
+
+Ask for confirmation before:
+- installing `uv`
+- editing shell profiles or PATH
+- creating a new `uv` environment
+- replacing an already installed `mindspore`, `torch`, or `torch_npu`
+- downloading a model from Hugging Face
+
+After the user has confirmed the target `uv` environment, you MAY do these
+without extra per-package confirmation:
+- install a missing `mindspore` package inside that environment
+- install missing `torch` or `torch_npu` packages inside that environment
+- install missing runtime Python dependencies inside that environment
+- install a clearly identified missing Python package needed to complete a
+  framework import or smoke test
 
 ## Execution Order
 
@@ -190,6 +211,21 @@ Enter this gate only after:
 - `uv` is directly callable
 - the user has confirmed the target `uv` environment
 
+In this gate, treat the detected CANN version as the primary selector for
+framework validation and remediation.
+
+Use this order:
+
+1. Detect the current CANN version from the system-layer evidence
+2. Detect the selected `uv` environment Python version
+3. Resolve compatible framework candidates from `references/ascend-compat.md`
+4. Load `references/framework-remediation.md` before changing framework
+   packages or retrying failed imports
+5. For PTA only, use `scripts/pta_compat_lookup.py` with remote fallback when
+   the local table cannot classify the tuple
+6. Compare the installed framework version against the compatible candidate set
+7. Run the framework smoke test only after compatibility classification
+
 ### MindSpore path
 
 Run:
@@ -199,14 +235,15 @@ python -c "import mindspore as ms; print(ms.__version__)" 2>/dev/null
 python -c "import mindspore as ms; ms.set_context(device_target='Ascend'); print('mindspore_ascend_ok')" 2>/dev/null
 ```
 
-Validate package presence, Python compatibility, CANN compatibility, and the
-minimal smoke test using `references/ascend-compat.md`.
+Then follow `references/framework-remediation.md`:
+- `MindSpore Path`
+- `Replacement Policy`
+- `Runtime Dependency Checks` when the failure is caused by a missing Python
+  package
 
-If MindSpore is missing:
-- remind the user to verify the Ascend system layer first
-- point to `https://www.hiascend.com/cann/download`
-- continue with framework installation only inside the selected `uv`
-  environment
+Always use `references/ascend-compat.md` to resolve the compatible MindSpore
+target version for the detected CANN version and current Python version before
+installing or replacing the package.
 
 ### PTA path (`torch` + `torch_npu`)
 
@@ -218,136 +255,41 @@ python -c "import torch_npu; print(torch_npu.__version__)" 2>/dev/null
 python -c "import torch, torch_npu; x=torch.tensor([1.0]).npu(); print('torch_npu_ok', x)" 2>/dev/null
 ```
 
-Validate package presence, Python compatibility, CANN compatibility, and the
-minimal smoke test using `references/ascend-compat.md`.
+Then follow `references/framework-remediation.md`:
+- `PTA Path`
+- `Replacement Policy`
+- `Runtime Dependency Checks` when the failure is caused by a missing Python
+  package
 
-If `torch` or `torch_npu` is missing:
-- remind the user to verify the Ascend system layer first
-- point to `https://www.hiascend.com/cann/download`
-- continue with framework installation only inside the selected `uv`
-  environment
+Use the bundled helper when deterministic PTA lookup is needed:
+
+```bash
+python scripts/pta_compat_lookup.py --cann 8.1.RC1 --torch 2.4.0 --torch-npu 2.4.0.post4 --python 3.10 --remote-fallback
+```
+
+If both framework paths are unhealthy, report both independently.
 
 ## Gate 6. Runtime Dependency Checks
 
-Run these package checks in the selected environment:
+Load `references/framework-remediation.md` and follow `Runtime Dependency
+Checks`.
 
-```bash
-python -c "import transformers; print(transformers.__version__)" 2>/dev/null
-python -c "import tokenizers; print(tokenizers.__version__)" 2>/dev/null
-python -c "import datasets; print(datasets.__version__)" 2>/dev/null
-python -c "import accelerate; print(accelerate.__version__)" 2>/dev/null
-python -c "import safetensors; print(safetensors.__version__)" 2>/dev/null
-python -c "import diffusers; print(diffusers.__version__)" 2>/dev/null
-```
-
-Policy:
-- `transformers`, `tokenizers`, `datasets`, `accelerate`, and `safetensors`
-  are standard runtime checks
-- require `diffusers` when `task_type=diffusion`
-- install only inside the selected `uv` environment
-- always ask for confirmation before creating a new `uv` environment or
-  installing Python packages
+Install missing runtime dependencies directly inside the selected `uv`
+environment. Do not guess a package name when the import error is ambiguous.
 
 ## Gate 7. Model-First Workspace Checks
 
 Always look for existing local model directories before considering any
-Hugging Face download.
+Hugging Face download. Load `references/workspace-discovery.md` before:
+- scanning for local model directories
+- deciding whether to download a model
+- searching for training scripts and checkpoints
+- classifying the workspace as ready, partial, or missing artifacts
 
-### 7.1 Find local model directories
-
-Exclude obvious environment and cache paths such as `.venv`, `.git`,
-`__pycache__`, `.cache`, and `node_modules`.
-
-Search for strong model markers:
-
-```bash
-find . \
-  \( -path "*/.venv" -o -path "*/.git" -o -path "*/__pycache__" -o -path "*/.cache" -o -path "*/node_modules" \) -prune \
-  -o -type f \
-  \( -name "config.json" -o -name "tokenizer.json" -o -name "tokenizer_config.json" -o -name "generation_config.json" -o -name "model.safetensors" -o -name "pytorch_model.bin" -o -name "*.safetensors" -o -name "*.index.json" \) \
-  -print 2>/dev/null
-```
-
-Classification:
-- local model directory check: `PASS` if one or more candidate model
-  directories exist, otherwise `FAIL`
-- print and record the candidate directory list with the marker files that were
-  detected
-
-If candidates exist:
-- always show the list to the user
-- always ask which model directory to use, even if there is only one candidate
-- do not download from Hugging Face unless the user explicitly declines the
-  local candidates
-
-### 7.2 Download only when no local model directory is selected
-
-If no candidate model directory exists, or the user declines all candidates:
-- ask the user which Hugging Face model to download
-- ask for confirmation before downloading
-- use `huggingface_hub.snapshot_download` inside the selected `uv` environment
-- download into `<workdir>/models/<repo_name>` by default unless `model_root`
-  is already specified
-- if the direct Hugging Face download fails because of DNS, timeout, proxy, or
-  other network reachability problems, retry with a China mirror by setting
-  `HF_ENDPOINT=https://hf-mirror.com`
-- if the repo is gated or private and authentication is missing, stop and
-  report a download/auth failure instead of guessing
-- do not treat authentication or permission failures as mirror candidates
-- after download, verify that the target directory exists and contains model
-  markers before classifying it as usable
-
-Example download pattern:
-
-```bash
-uv run --python .venv/bin/python python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='org/model', local_dir='./models/model', local_dir_use_symlinks=False)"
-```
-
-Mirror retry pattern:
-
-```bash
-HF_ENDPOINT=https://hf-mirror.com uv run --python .venv/bin/python python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='org/model', local_dir='./models/model', local_dir_use_symlinks=False)"
-```
-
-Record whether the selected model came from:
-- a local directory
-- a Hugging Face download
-
-### 7.3 Check scripts and checkpoint files
-
-Use two separate roots:
-- current work dir for training script discovery
-- selected local or downloaded model directory for checkpoint discovery
-
-Run:
-
-```bash
-find . \
-  \( -path "*/.venv" -o -path "*/.git" -o -path "*/__pycache__" -o -path "*/.cache" -o -path "*/node_modules" \) -prune \
-  -o -type f \
-  \( -iname "train*.py" -o -iname "finetune*.py" -o -iname "run*.py" -o -iname "main*.py" -o -path "*/scripts/train*.py" -o -path "*/scripts/finetune*.py" \) \
-  -print 2>/dev/null
-find "<selected_model_dir>" -type f \( -name "*.ckpt" -o -name "*.pt" -o -name "*.pth" -o -name "*.bin" -o -name "*.safetensors" \) 2>/dev/null
-```
-
-Classification:
-- if `task_type=training`, training script check is `PASS` if one or more
-  candidate training entry scripts exist, otherwise `FAIL`
-- if `task_type=inference`, missing training scripts are `INFO` rather than
-  `FAIL`
-- checkpoint check is `PASS` if one or more `.ckpt`, `.pt`, `.pth`, `.bin`,
-  or `.safetensors` files exist, otherwise `FAIL`
-- do not treat arbitrary utility or test Python files as training scripts
-- if files are found, print and record the matched training script paths and
-  checkpoint paths
-
-If the selected workspace is missing training scripts or checkpoint files:
-- do not reclassify the Ascend driver/CANN/framework setup as failed
-- report it as a workspace-preparation failure or partial result
-- if multiple candidate training scripts exist, show the list and ask the user
-  which one is the intended entry script
-- if a selected model directory exists but required artifacts are still
-  missing, tell the user exactly which artifacts are absent
+Follow:
+- `Model-First Policy`
+- `Download only when no local model directory is selected`
+- `Script and Checkpoint Discovery`
 
 ## Final Output
 

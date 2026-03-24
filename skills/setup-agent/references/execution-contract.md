@@ -70,19 +70,27 @@ The console output must still cover:
 - current work dir
 - NPU visibility and `npu-smi` result
 - driver, firmware, and CANN state
+- detected CANN version used for framework compatibility resolution
 - `set_env.sh` sourcing result
 - `uv` availability, direct shell resolution status, any PATH update action, selected environment, and Python details from inside `uv`
   - direct shell resolution status
   - PATH update action
 - MindSpore results
 - `torch` / `torch_npu` results
+- framework compatibility reasoning
+  - installed framework version(s)
+  - recommended compatible version(s)
+  - mismatch cause such as Python range, framework version, or PTA build suffix
+  - whether a replacement was offered and whether the user confirmed it
 - runtime dependency and install results
+  - direct `pip install` remediation inside the selected `uv` environment
   - `transformers`
   - `tokenizers`
   - `datasets`
   - `accelerate`
   - `safetensors`
   - `diffusers`
+  - Python packages installed to recover a failed framework import or smoke test
 - work dir artifact results
   - local model directory findings
   - candidate model directory list
@@ -95,8 +103,10 @@ The console output must still cover:
 - smoke test results
 - final mailbox summary that reflects any successful installs or repairs
 - manual system-layer remediation steps if needed
-- the `https://www.hiascend.com/cann/download` link when Ascend driver,
-  framework, or toolkit is missing
+- framework package installs or replacements performed inside the selected `uv`
+  environment
+- the `https://www.hiascend.com/cann/download` link when Ascend driver or
+  toolkit is missing
 - generic Hugging Face download guidance when training scripts or checkpoint
   files are missing from the current work dir
 - China mirror fallback guidance using `HF_ENDPOINT=https://hf-mirror.com`
