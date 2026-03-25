@@ -1,19 +1,16 @@
 # Skill Examples
 
-This directory introduces runnable examples for the MindSpore skills repository.
+This directory tracks example material for the MindSpore skills repository.
 
-Its purpose is to give users small, concrete references they can inspect and run to understand how the skills connect to real MindSpore development workflows.
+Its purpose is to give users small, concrete references they can inspect as the examples set grows.
 
-## What Lives Here
+## Current Status
 
-- `cpu/`: CPU-oriented examples and minimal runnable demos
+- This directory currently contains documentation only.
+- Runnable example folders are not checked in on this branch yet.
 
-## How To Use These Examples
+## How To Use It
 
-1. Pick an example folder that matches the environment or workflow you want to study.
-2. Read the example-specific notes or expected result file first.
-3. Run the provided script to verify the example end to end.
-
-## Current Example
-
-- `cpu/plugin_add/`: minimal CPU plugin-add example with a runnable script and expected result contract
+1. Read this directory when you want a quick overview of example coverage.
+2. Check the repository tree before expecting a runnable example script.
+3. Add new example folders here when concrete demos are introduced.

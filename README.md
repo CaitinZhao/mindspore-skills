@@ -1,6 +1,6 @@
 # MindSpore Skills
 
-MindSpore development skills for AI coding agents. Build CPU/GPU/NPU operators and migrate models with guided workflows.
+MindSpore development skills for AI coding agents. Route operator work, migrate models, and diagnose readiness, failure, accuracy, and performance issues with guided workflows.
 
 Compatible with **Claude Code**, **OpenCode**, **Gemini CLI**, and **Codex**.
 
@@ -24,6 +24,7 @@ Then use slash command:
 /mscode:operator-agent
 /mscode:readiness-agent
 /mscode:accuracy-agent
+/mscode:failure-agent
 /mscode:algorithm-agent
 /mscode:performance-agent
 ```
@@ -92,7 +93,7 @@ See [Codex AGENTS guide](https://developers.openai.com/codex/guides/agents-md) f
 | Skill | Description |
 |-------|-------------|
 | `api-helper` | Find API call chains and operator wiring in MindSpore codebase |
-| `operator-agent` | Build `torch` or `mindspore` operators through custom-access or native-framework integration |
+| `operator-agent` | Route and build `torch` or `mindspore` operators through custom-access or native-framework integration, with MindSpore API-resolution and `op_info` verification support |
 
 ### Model Migration
 
@@ -117,7 +118,7 @@ See [Codex AGENTS guide](https://developers.openai.com/codex/guides/agents-md) f
 | Command | Description |
 |---------|-------------|
 | `/api-helper` | API chain discovery workflow |
-| `/operator-agent` | Operator implementation workflow with custom-access or native-framework routing |
+| `/operator-agent` | Operator routing and implementation workflow with custom-access or native-framework integration |
 
 ### Model Migration
 
@@ -146,13 +147,9 @@ See [Codex AGENTS guide](https://developers.openai.com/codex/guides/agents-md) f
 > Help me implement the linspace operator and choose the right integration path
 ```
 
-### Run minimal public example
+### Examples
 
-```bash
-bash examples/cpu/plugin_add/run.sh
-```
-
-See expected result contract in `examples/cpu/plugin_add/expected.md`.
+See `examples/README.md` for the current example inventory and status.
 
 ## Contract and Tests
 
@@ -168,12 +165,13 @@ See expected result contract in `examples/cpu/plugin_add/expected.md`.
 
 ```
 mindspore-skills/
-├── .claude-plugin/          # Claude Code plugin config
 ├── commands/                # Slash commands
 │   ├── api-helper.md        # API chain discovery
+│   ├── failure-agent.md     # Failure diagnosis
 │   ├── migrate.md           # Migration router
 │   └── ...
 ├── skills/                  # Skill definitions
+│   ├── api-helper/          # MindSpore API call-chain discovery
 │   ├── model-agent/         # Top-level model migration entry
 │   ├── operator-agent/      # Framework operator implementation
 │   ├── readiness-agent/     # Training workspace readiness and preflight
@@ -182,6 +180,7 @@ mindspore-skills/
 │   ├── failure-agent/       # Training and runtime failure diagnosis
 │   └── performance-agent/   # Performance diagnosis after the workload already runs
 ├── AGENTS.md                # Codex instructions
+├── CLAUDE.md                # Claude-facing repository notes
 └── gemini-extension.json    # Gemini CLI config
 ```
 
@@ -195,7 +194,7 @@ When adding a new skill:
 3. Update `AGENTS.md` (skill table + activation triggers)
 4. Update `README.md` (skill list and commands)
 5. Update `gemini-extension.json` with name/path/description
-6. Update `.claude-plugin/marketplace.json` if skills or metadata changed
+6. Update `CLAUDE.md` if Claude-facing setup or maintenance notes changed
 
 When modifying an existing skill:
 1. Update `skills/<skill-name>/SKILL.md` and any referenced files
