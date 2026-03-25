@@ -61,6 +61,8 @@ def normalize_checks(checks: List[dict]) -> dict:
                 "remediable": remediable,
                 "remediation_owner": owner,
                 "revalidation_scope": check.get("revalidation_scope") or [],
+                "package_name": check.get("package_name"),
+                "package_names": check.get("package_names") or [],
             }
         )
 

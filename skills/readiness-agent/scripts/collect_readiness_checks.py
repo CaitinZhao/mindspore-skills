@@ -26,6 +26,7 @@ def make_check(
     remediation_owner: Optional[str] = None,
     revalidation_scope: Optional[List[str]] = None,
     evidence: Optional[List[str]] = None,
+    **extra: object,
 ) -> dict:
     payload = {
         "id": check_id,
@@ -43,7 +44,27 @@ def make_check(
         payload["remediation_owner"] = remediation_owner
     if revalidation_scope is not None:
         payload["revalidation_scope"] = revalidation_scope
+    payload.update(extra)
     return payload
+
+
+def resolve_runtime_package_names(runtime_layer: dict, missing_runtime: List[str]) -> List[str]:
+    profile = runtime_layer.get("implicit_dependency_profile") or []
+    mapping = {}
+    for item in profile:
+        if not isinstance(item, dict):
+            continue
+        import_name = str(item.get("import_name") or "").strip()
+        package_name = str(item.get("package_name") or "").strip()
+        if import_name and package_name:
+            mapping[import_name] = package_name
+
+    package_names: List[str] = []
+    for import_name in missing_runtime:
+        package_name = mapping.get(import_name, import_name)
+        if package_name not in package_names:
+            package_names.append(package_name)
+    return package_names
 
 
 def collect_checks(target: dict, closure: dict) -> List[dict]:
@@ -320,6 +341,23 @@ def collect_checks(target: dict, closure: dict) -> List[dict]:
         evidence = [f"probe_source={runtime_probe_source}", *missing_runtime]
         if runtime_probe_error:
             evidence.append(f"probe_error={runtime_probe_error}")
+        package_names = resolve_runtime_package_names(runtime_layer, missing_runtime)
+        implicit_profile = runtime_layer.get("implicit_dependency_profile") or []
+        for item in implicit_profile:
+            if not isinstance(item, dict):
+                continue
+            import_name = str(item.get("import_name") or "").strip()
+            if import_name not in missing_runtime:
+                continue
+            package_name = str(item.get("package_name") or "").strip()
+            required_for = str(item.get("required_for") or "").strip()
+            reason = str(item.get("reason") or "").strip()
+            if package_name:
+                evidence.append(f"package_name[{import_name}]={package_name}")
+            if required_for:
+                evidence.append(f"required_for[{import_name}]={required_for}")
+            if reason:
+                evidence.append(f"profile_reason[{import_name}]={reason}")
         checks.append(
             make_check(
                 "runtime-importability",
@@ -331,6 +369,7 @@ def collect_checks(target: dict, closure: dict) -> List[dict]:
                 remediation_owner="readiness-agent",
                 revalidation_scope=["runtime-dependencies", "framework"],
                 evidence=evidence,
+                package_names=package_names,
             )
         )
 

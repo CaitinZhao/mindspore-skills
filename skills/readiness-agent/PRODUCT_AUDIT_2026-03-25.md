@@ -91,6 +91,10 @@ Recommended readiness level:
   not already active
 - PTA framework repair now prefers CPU `torch` wheels and installs `torch_npu`
   separately, avoiding unnecessary NVIDIA dependency pulls on Ascend
+- Ascend-backed `pta`, `mindspore`, and `mixed` paths now carry a small known
+  hidden runtime dependency profile for compiler-side Python modules such as
+  `decorator`, `scipy`, and `attrs`, allowing env-fix to remediate them in one
+  pass instead of discovering them one at a time during later runtime
 
 ## Evidence Of Stability
 
@@ -124,6 +128,17 @@ not a real task-level framework execution path such as:
 
 This is acceptable for now, but stronger task evidence would reduce false
 `READY` in edge cases where import succeeds but runtime usage still fails.
+
+### 1.5 Ascend Hidden Dependency Coverage Is Now Better, But Still Profile-Based
+
+The readiness closure now models a small known set of Ascend compiler-side
+Python dependencies for `pta` and `mindspore` paths. This improves the common
+server experience materially because `decorator`, `scipy`, and `attrs` can be
+planned and installed in a single remediation round.
+
+However, this is still a profile-based approach, not a full dynamic discovery
+engine. Rare server-specific compiler-side imports may still surface later and
+require one more remediation pass.
 
 ### 2. `env_fix` Capability Is Still Narrow By Design
 

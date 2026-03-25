@@ -176,6 +176,35 @@ def test_normalize_blockers_maps_categories(tmp_path: Path):
     assert normalized["blockers_detailed"][0]["remediable"] is True
 
 
+def test_normalize_blockers_preserves_package_names(tmp_path: Path):
+    checks_path = tmp_path / "checks.json"
+    checks_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "runtime-importability",
+                    "status": "block",
+                    "summary": "Ascend hidden runtime imports are unavailable.",
+                    "category_hint": "env",
+                    "package_names": ["decorator", "scipy", "attrs"],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "normalized.json"
+
+    run_script(
+        "normalize_blockers.py",
+        "--input-json",
+        str(checks_path),
+        "--output-json",
+        str(output),
+    )
+    normalized = json.loads(output.read_text(encoding="utf-8"))
+    assert normalized["blockers_detailed"][0]["package_names"] == ["decorator", "scipy", "attrs"]
+
+
 def test_build_dependency_closure_tracks_required_assets(tmp_path: Path):
     (tmp_path / "infer.py").write_text(
         "import torch\nimport torch_npu\nimport transformers\n",
@@ -220,6 +249,54 @@ def test_build_dependency_closure_tracks_required_assets(tmp_path: Path):
     assert closure["layers"]["workspace_assets"]["entry_script"]["exists"] is True
     assert closure["layers"]["workspace_assets"]["model_path"]["exists"] is True
     assert closure["complete_for_static_validation"] is True
+
+
+def test_build_dependency_closure_adds_ascend_hidden_runtime_profile_for_mindspore(tmp_path: Path):
+    (tmp_path / "train.py").write_text(
+        "import mindspore as ms\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "model").mkdir()
+    ascend_home = tmp_path / "ascend"
+    ascend_home.mkdir()
+    (ascend_home / "set_env.sh").write_text("export FAKE_ASCEND_READY=1\n", encoding="utf-8")
+    target_path = tmp_path / "target.json"
+    closure_path = tmp_path / "closure.json"
+    target_path.write_text(
+        json.dumps(
+            {
+                "working_dir": str(tmp_path),
+                "target_type": "training",
+                "entry_script": "train.py",
+                "framework_path": "mindspore",
+                "selected_python": sys.executable,
+                "model_path": "model",
+                "launch_cmd": "python train.py",
+            }
+        ),
+        encoding="utf-8",
+    )
+    env = dict(os.environ)
+    env["ASCEND_HOME_PATH"] = str(ascend_home)
+
+    run_script(
+        "build_dependency_closure.py",
+        "--target-json",
+        str(target_path),
+        "--output-json",
+        str(closure_path),
+        env=env,
+    )
+    closure = json.loads(closure_path.read_text(encoding="utf-8"))
+    runtime_layer = closure["layers"]["runtime_dependencies"]
+    required_imports = runtime_layer["required_imports"]
+    implicit_profile = runtime_layer["implicit_dependency_profile"]
+
+    assert "mindspore" in required_imports
+    assert "decorator" in required_imports
+    assert "scipy" in required_imports
+    assert "attr" in required_imports
+    assert any(item["package_name"] == "attrs" for item in implicit_profile)
 
 
 def test_build_dependency_closure_prefers_selected_env_probe_python(tmp_path: Path):
@@ -505,6 +582,97 @@ def test_collect_readiness_checks_flags_missing_framework_packages(tmp_path: Pat
     assert by_id["framework-importability"]["category_hint"] == "framework"
 
 
+def test_collect_readiness_checks_uses_structured_hidden_runtime_package_names(tmp_path: Path):
+    target_path = tmp_path / "target.json"
+    closure_path = tmp_path / "closure.json"
+    checks_path = tmp_path / "checks.json"
+
+    target_path.write_text(
+        json.dumps(
+            {
+                "target_type": "inference",
+                "working_dir": str(tmp_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    closure_path.write_text(
+        json.dumps(
+            {
+                "layers": {
+                    "system": {
+                        "requires_ascend": True,
+                    },
+                    "python_environment": {
+                        "tooling": {
+                            "uv_available": True,
+                            "uv_path": "/usr/bin/uv",
+                        }
+                    },
+                    "framework": {
+                        "framework_path": "pta",
+                        "required_packages": ["torch", "torch_npu"],
+                        "import_probes": {
+                            "torch": True,
+                            "torch_npu": True,
+                        },
+                        "probe_source": "workspace_env",
+                    },
+                    "runtime_dependencies": {
+                        "required_imports": ["decorator", "scipy", "attr"],
+                        "import_probes": {
+                            "decorator": False,
+                            "scipy": False,
+                            "attr": False,
+                        },
+                        "probe_source": "workspace_env",
+                        "implicit_dependency_profile": [
+                            {
+                                "import_name": "decorator",
+                                "package_name": "decorator",
+                                "required_for": "ascend-compiler",
+                                "reason": "Ascend compiler adapters import decorator.",
+                            },
+                            {
+                                "import_name": "scipy",
+                                "package_name": "scipy",
+                                "required_for": "ascend-compiler",
+                                "reason": "Ascend compiler adapters import scipy.",
+                            },
+                            {
+                                "import_name": "attr",
+                                "package_name": "attrs",
+                                "required_for": "ascend-compiler",
+                                "reason": "Ascend compiler adapters import attr.",
+                            },
+                        ],
+                    },
+                    "workspace_assets": {
+                        "entry_script": {"required": True, "exists": True},
+                        "model_path": {"required": True, "exists": True},
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    run_script(
+        "collect_readiness_checks.py",
+        "--target-json",
+        str(target_path),
+        "--closure-json",
+        str(closure_path),
+        "--output-json",
+        str(checks_path),
+    )
+    checks = json.loads(checks_path.read_text(encoding="utf-8"))
+    by_id = {item["id"]: item for item in checks}
+    assert by_id["runtime-importability"]["status"] == "block"
+    assert by_id["runtime-importability"]["package_names"] == ["decorator", "scipy", "attrs"]
+    assert "package_name[attr]=attrs" in by_id["runtime-importability"]["evidence"]
+
+
 def test_plan_env_fix_filters_non_package_framework_evidence(tmp_path: Path):
     blockers_path = tmp_path / "blockers.json"
     closure_path = tmp_path / "closure.json"
@@ -558,7 +726,50 @@ def test_plan_env_fix_filters_non_package_framework_evidence(tmp_path: Path):
     plan = json.loads(output.read_text(encoding="utf-8"))
     assert plan["actions"][0]["action_type"] == "repair_pta_framework"
     assert plan["actions"][0]["package_names"] == ["torch", "torch_npu"]
-    assert "mindspore" in by_id["framework-importability"]["summary"]
+
+
+def test_plan_env_fix_prefers_structured_runtime_package_names(tmp_path: Path):
+    blockers_path = tmp_path / "blockers.json"
+    closure_path = tmp_path / "closure.json"
+    output = tmp_path / "plan.json"
+
+    blockers_path.write_text(
+        json.dumps(
+            {
+                "blockers_detailed": [
+                    {
+                        "id": "runtime-importability",
+                        "category": "env_remediable",
+                        "summary": "Required runtime imports are unavailable in the selected environment: decorator, scipy, attr.",
+                        "evidence": [
+                            "probe_source=workspace_env",
+                            "decorator",
+                            "scipy",
+                            "attr",
+                        ],
+                        "package_names": ["decorator", "scipy", "attrs"],
+                        "remediable": True,
+                        "revalidation_scope": ["runtime-dependencies", "framework"],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    closure_path.write_text(json.dumps({"layers": {}}, indent=2), encoding="utf-8")
+
+    run_script(
+        "plan_env_fix.py",
+        "--blockers-json",
+        str(blockers_path),
+        "--closure-json",
+        str(closure_path),
+        "--output-json",
+        str(output),
+    )
+    plan = json.loads(output.read_text(encoding="utf-8"))
+    assert plan["actions"][0]["action_type"] == "install_runtime_dependency"
+    assert plan["actions"][0]["package_names"] == ["decorator", "scipy", "attrs"]
 
 
 def test_collect_readiness_checks_flags_unusable_selected_env(tmp_path: Path):

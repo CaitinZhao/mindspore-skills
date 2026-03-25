@@ -22,6 +22,30 @@ RUNTIME_IMPORT_CANDIDATES = {
     "diffusers",
 }
 
+ASCEND_HIDDEN_RUNTIME_DEPENDENCIES = [
+    {
+        "import_name": "decorator",
+        "package_name": "decorator",
+        "framework_paths": ["mindspore", "pta", "mixed"],
+        "required_for": "ascend-compiler",
+        "reason": "Ascend compiler adapters import decorator during graph and operator compilation.",
+    },
+    {
+        "import_name": "scipy",
+        "package_name": "scipy",
+        "framework_paths": ["mindspore", "pta", "mixed"],
+        "required_for": "ascend-compiler",
+        "reason": "Ascend compiler adapters import scipy during TBE or AOE initialization.",
+    },
+    {
+        "import_name": "attr",
+        "package_name": "attrs",
+        "framework_paths": ["mindspore", "pta", "mixed"],
+        "required_for": "ascend-compiler",
+        "reason": "Ascend compiler adapters import attr from the attrs package during TBE or AOE initialization.",
+    },
+]
+
 PROBE_CODE = """
 import importlib.util
 import json
@@ -82,6 +106,29 @@ def extract_runtime_imports(entry_script: Optional[Path]) -> List[str]:
         if f"import {name}" in text or f"from {name}" in text:
             found.append(name)
     return found
+
+
+def ascend_hidden_runtime_profile(framework_path: str, system_layer: dict) -> List[dict]:
+    ascend_evidence_present = bool(
+        system_layer.get("device_paths_present")
+        or system_layer.get("ascend_env_script_present")
+        or system_layer.get("ascend_env_active")
+    )
+    if not ascend_evidence_present:
+        return []
+    if framework_path not in {"mindspore", "pta", "mixed"}:
+        return []
+
+    return [
+        {
+            "import_name": item["import_name"],
+            "package_name": item["package_name"],
+            "required_for": item["required_for"],
+            "reason": item["reason"],
+        }
+        for item in ASCEND_HIDDEN_RUNTIME_DEPENDENCIES
+        if framework_path in item["framework_paths"]
+    ]
 
 
 def detect_output_path(target: dict, root: Path, entry_script: Optional[Path]) -> Optional[str]:
@@ -273,12 +320,22 @@ def build_framework_layer(
 
 def build_runtime_layer(
     entry_script: Optional[Path],
+    framework_path: str,
+    system_layer: dict,
     python_layer: dict,
     probe_env: Optional[Dict[str, str]] = None,
 ) -> dict:
-    required_imports = extract_runtime_imports(entry_script)
+    explicit_imports = extract_runtime_imports(entry_script)
+    implicit_profile = ascend_hidden_runtime_profile(framework_path, system_layer)
+    required_imports: List[str] = list(explicit_imports)
+    for item in implicit_profile:
+        import_name = str(item.get("import_name") or "").strip()
+        if import_name and import_name not in required_imports:
+            required_imports.append(import_name)
     import_probes, probe_error = probe_imports(required_imports, python_layer, probe_env)
     return {
+        "explicit_imports": explicit_imports,
+        "implicit_dependency_profile": implicit_profile,
         "required_imports": required_imports,
         "import_probes": import_probes,
         "probe_source": python_layer.get("probe_source"),
@@ -359,7 +416,13 @@ def build_dependency_closure(target: dict, root: Path) -> dict:
         "system": system_layer,
         "python_environment": python_layer,
         "framework": build_framework_layer(target, python_layer, probe_env),
-        "runtime_dependencies": build_runtime_layer(entry_script, python_layer, probe_env),
+        "runtime_dependencies": build_runtime_layer(
+            entry_script,
+            target.get("framework_path") or "unknown",
+            system_layer,
+            python_layer,
+            probe_env,
+        ),
         "workspace_assets": build_workspace_layer(target, root, target_type, entry_script),
         "task_execution": build_task_layer(target),
     }

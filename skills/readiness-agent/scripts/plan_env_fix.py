@@ -46,6 +46,14 @@ def infer_framework_action(summary: str, closure: dict) -> Tuple[str, str]:
 
 
 def package_hints(blocker: dict, closure: dict, *, framework_fallback: bool = False) -> List[str]:
+    explicit_package_names = blocker.get("package_names") or []
+    if explicit_package_names:
+        return [str(item) for item in explicit_package_names if isinstance(item, str) and item]
+
+    explicit_package_name = blocker.get("package_name")
+    if isinstance(explicit_package_name, str) and explicit_package_name:
+        return [explicit_package_name]
+
     evidence = blocker.get("evidence") or []
     packages = [
         item
@@ -110,7 +118,7 @@ def plan_actions(blockers: List[dict], closure: dict, allow_network: bool, fix_s
                         revalidation_scope or ["tool-resolution"],
                     )
                 )
-            elif blocker_id == "python-selected-python" or "selected python" in lower or "environment" in lower or "env" in lower:
+            elif blocker_id == "python-selected-python" or "selected python" in lower or "python environment" in lower:
                 actions.append(
                     build_action(
                         f"action-{index}",

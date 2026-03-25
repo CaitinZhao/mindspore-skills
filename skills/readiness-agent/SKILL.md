@@ -181,6 +181,10 @@ For PTA / Ascend paths, downstream probing may source a detected local
 When native env-fix repairs a PTA framework path on Ascend, prefer CPU
 `torch` wheels and keep `torch_npu` on the default package source instead of
 pulling CUDA/NVIDIA package sets that are not required for Ascend execution.
+For Ascend-backed `mindspore`, `pta`, and `mixed` paths, dependency closure
+should also account for known hidden Python-side compiler dependencies such as
+`decorator`, `scipy`, and `attrs`, so env-fix can install them in one pass
+instead of discovering them one module at a time during runtime.
 
 ## Stage 1. Execution-Target Discovery
 
@@ -223,7 +227,8 @@ The dependency closure must cover:
   PATH viability
 - framework layer such as MindSpore or PTA compatibility and smoke readiness
 - runtime dependency layer such as the imports actually required by the chosen
-  script
+  script, plus known platform-side hidden dependencies when the selected path
+  implies Ascend compiler usage
 - workspace and asset layer such as scripts, config, model, dataset,
   checkpoint, output path, permissions, and storage
 - task execution layer such as required command arguments or minimum runnable
