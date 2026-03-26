@@ -1,10 +1,11 @@
 ---
-description: Analyze a local single-machine training workspace, validate readiness before training, and emit a reusable snapshot and report
+description: Certify whether a local single-machine workspace is runnable for the intended training or inference task by discovering the execution target, validating dependency closure, optionally applying safe user-space remediation, revalidating affected checks, and emitting a reusable readiness report
 ---
 
 # Readiness Agent
 
-Direct specialist entry for training workspace readiness before execution.
+Direct specialist entry for local single-machine readiness certification before
+execution.
 
 For most users, prefer:
 
@@ -13,15 +14,21 @@ For most users, prefer:
 Use `/readiness-agent` only when you already know you want to force the
 readiness specialist directly.
 
-Load the `readiness-agent` skill and follow its workflow:
+Load the `readiness-agent` skill and follow its readiness certification
+workflow:
 
-1. workspace analysis
-2. compatibility validation
-3. snapshot build
-4. report build
+1. selected Python resolution
+2. execution target discovery
+3. dependency closure and compatibility validation
+4. blocker classification
+5. optional safe user-space remediation and revalidation
+6. readiness report build
 
 ## Typical Inputs
 
 - code folder or working directory
-- train config, model, dataset, or checkpoint paths if already known
-- framework hints if the user already knows them
+- intended target or explicit entry script if already known
+- training or inference config, model, dataset, or checkpoint paths if already
+  known
+- selected Python or selected environment root if already known
+- explicit minimal smoke command if the user already knows a safe one
