@@ -69,6 +69,41 @@ def resolve_runtime_package_names(runtime_layer: dict, missing_runtime: List[str
     return package_names
 
 
+ASSET_METADATA_FIELDS = (
+    "asset_kind",
+    "asset_provider",
+    "asset_repo_id",
+    "asset_repo_type",
+    "asset_local_path",
+    "dataset_split",
+    "template_path",
+    "example_recipe_id",
+    "reference_transformers_version",
+)
+
+
+def asset_check_fields(asset: dict, key: str) -> dict:
+    payload = {
+        "asset_kind": key,
+        "asset_local_path": asset.get("path"),
+    }
+    if asset.get("asset_provider"):
+        payload["asset_provider"] = asset.get("asset_provider")
+    if asset.get("repo_id"):
+        payload["asset_repo_id"] = asset.get("repo_id")
+    if asset.get("repo_type"):
+        payload["asset_repo_type"] = asset.get("repo_type")
+    if asset.get("dataset_split"):
+        payload["dataset_split"] = asset.get("dataset_split")
+    if asset.get("template_path"):
+        payload["template_path"] = asset.get("template_path")
+    if asset.get("example_recipe_id"):
+        payload["example_recipe_id"] = asset.get("example_recipe_id")
+    if asset.get("reference_transformers_version"):
+        payload["reference_transformers_version"] = asset.get("reference_transformers_version")
+    return payload
+
+
 def collect_checks(target: dict, closure: dict) -> List[dict]:
     checks: List[dict] = []
     target_type = target.get("target_type") or "unknown"
@@ -111,6 +146,7 @@ def collect_checks(target: dict, closure: dict) -> List[dict]:
         ascend_env_script_path = system.get("ascend_env_script_path") or "/usr/local/Ascend/ascend-toolkit/set_env.sh"
         probe_env_source = system.get("probe_env_source")
         probe_env_error = system.get("probe_env_error")
+        ascend_env_active = bool(system.get("ascend_env_active"))
         if not system.get("device_paths_present"):
             checks.append(
                 make_check(
@@ -135,7 +171,28 @@ def collect_checks(target: dict, closure: dict) -> List[dict]:
                 )
             )
 
-        if not system.get("ascend_env_script_present"):
+        evidence = []
+        if ascend_env_script_path:
+            evidence.append(f"set_env.sh={ascend_env_script_path}")
+        if system.get("ascend_env_selection_source"):
+            evidence.append(f"selection_source={system.get('ascend_env_selection_source')}")
+        if system.get("cann_path_input"):
+            evidence.append(f"cann_path_input={system.get('cann_path_input')}")
+        if probe_env_source:
+            evidence.append(f"probe_env_source={probe_env_source}")
+        if probe_env_error:
+            evidence.append(f"probe_env_error={probe_env_error}")
+
+        if ascend_env_active:
+            checks.append(
+                make_check(
+                    "system-ascend-env",
+                    "ok",
+                    "Ascend runtime environment is already active.",
+                    evidence=evidence or ["current Ascend environment is active"],
+                )
+            )
+        elif not system.get("ascend_env_script_present"):
             checks.append(
                 make_check(
                     "system-ascend-env",
@@ -149,17 +206,26 @@ def collect_checks(target: dict, closure: dict) -> List[dict]:
                     evidence=[f"{ascend_env_script_path} missing"],
                 )
             )
-        else:
-            evidence = [f"set_env.sh={ascend_env_script_path}"]
-            if probe_env_source:
-                evidence.append(f"probe_env_source={probe_env_source}")
-            if probe_env_error:
-                evidence.append(f"probe_env_error={probe_env_error}")
+        elif probe_env_source == "sourced_script" and not probe_env_error:
             checks.append(
                 make_check(
                     "system-ascend-env",
                     "ok",
-                    "Ascend environment sourcing script is present.",
+                    "Ascend environment script sourced successfully for runtime probing.",
+                    evidence=evidence,
+                )
+            )
+        else:
+            checks.append(
+                make_check(
+                    "system-ascend-env",
+                    "block",
+                    "Ascend environment script is present but unusable for runtime probing.",
+                    category_hint="system",
+                    severity="fatal",
+                    remediable=False,
+                    remediation_owner="manual-system",
+                    revalidation_scope=["system"],
                     evidence=evidence,
                 )
             )
@@ -431,7 +497,25 @@ def collect_checks(target: dict, closure: dict) -> List[dict]:
         required = asset.get("required", False)
         exists = asset.get("exists", False)
         if required and not exists:
-            if key == "entry_script":
+            if key == "entry_script" and asset.get("source") == "bundled-example" and asset.get("template_path"):
+                evidence = [f"{key} missing", f"template_path={asset.get('template_path')}"]
+                if asset.get("example_recipe_id"):
+                    evidence.append(f"example_recipe_id={asset.get('example_recipe_id')}")
+                checks.append(
+                    make_check(
+                        f"workspace-{key}",
+                        "block",
+                        "Required training entry script is missing but can be scaffolded from the bundled example recipe.",
+                        category_hint="asset",
+                        severity="high",
+                        remediable=True,
+                        remediation_owner="readiness-agent",
+                        revalidation_scope=["workspace-assets", "target", "runtime-dependencies"],
+                        evidence=evidence,
+                        **asset_check_fields(asset, key),
+                    )
+                )
+            elif key == "entry_script":
                 checks.append(
                     make_check(
                         f"workspace-{key}",
@@ -443,6 +527,24 @@ def collect_checks(target: dict, closure: dict) -> List[dict]:
                         remediation_owner="workspace",
                         revalidation_scope=["workspace-assets", "target"],
                         evidence=[f"{key} missing"],
+                    )
+                )
+            elif key == "dataset_path" and asset.get("asset_provider") == "huggingface" and asset.get("repo_id"):
+                evidence = [f"{key} missing", f"asset_provider={asset.get('asset_provider')}", f"repo_id={asset.get('repo_id')}"]
+                if asset.get("dataset_split"):
+                    evidence.append(f"dataset_split={asset.get('dataset_split')}")
+                checks.append(
+                    make_check(
+                        f"workspace-{key}",
+                        "block",
+                        "Required dataset asset is missing locally but can be downloaded from Hugging Face.",
+                        category_hint="asset",
+                        severity="high",
+                        remediable=True,
+                        remediation_owner="readiness-agent",
+                        revalidation_scope=["workspace-assets", "task-smoke"],
+                        evidence=evidence,
+                        **asset_check_fields(asset, key),
                     )
                 )
             elif key == "dataset_path":
@@ -460,17 +562,27 @@ def collect_checks(target: dict, closure: dict) -> List[dict]:
                     )
                 )
             else:
+                evidence = [f"{key} missing"]
+                if asset.get("asset_provider"):
+                    evidence.append(f"asset_provider={asset.get('asset_provider')}")
+                if asset.get("repo_id"):
+                    evidence.append(f"repo_id={asset.get('repo_id')}")
                 checks.append(
                     make_check(
                         f"workspace-{key}",
                         "block",
-                        f"Required asset {key} is missing.",
+                        (
+                            f"Required asset {key} is missing locally but can be downloaded from Hugging Face."
+                            if asset.get("asset_provider") == "huggingface" and asset.get("repo_id")
+                            else f"Required asset {key} is missing."
+                        ),
                         category_hint="asset",
                         severity="high",
-                        remediable=True,
+                        remediable=bool(asset.get("asset_provider") == "huggingface" and asset.get("repo_id")) or key == "model_path",
                         remediation_owner="readiness-agent",
                         revalidation_scope=["workspace-assets", "task-smoke"],
-                        evidence=[f"{key} missing"],
+                        evidence=evidence,
+                        **asset_check_fields(asset, key),
                     )
                 )
         elif required and exists:

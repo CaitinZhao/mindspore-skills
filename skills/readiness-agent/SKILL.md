@@ -53,6 +53,8 @@ It may:
 - validate dependency closure
 - classify blockers and warnings
 - optionally apply safe user-space remediation when the workflow permits it
+- materialize missing target-scoped example scripts or Hugging Face assets when
+  the workflow permits it
 - revalidate the affected path before final certification
 
 It does not:
@@ -109,7 +111,9 @@ Do not use this skill for:
 - Never substitute system `python`, `python3`, or `pip` for a missing
   workspace-local environment. If the selected environment is unresolved,
   block or repair the environment first.
-- Do not mutate model, dataset, checkpoint, or config files.
+- Do not mutate existing model, dataset, checkpoint, or config files in place.
+- You may materialize missing target-scoped example scripts, model snapshots,
+  or dataset snapshots inside the workspace when the workflow permits it.
 - After every successful mutation, rerun affected checks before final status.
 - You may write readiness artifacts under the workspace output directory.
 - Resolve one selected workspace Python before running the rest of the helper

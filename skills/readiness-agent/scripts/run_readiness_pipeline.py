@@ -78,13 +78,18 @@ def write_inputs_snapshot(args: argparse.Namespace, working_dir: Path, output_di
         "working_dir": str(working_dir),
         "output_dir": str(output_dir),
         "target": args.target,
+        "framework_hint": args.framework_hint,
+        "cann_path": args.cann_path,
         "mode": args.mode,
         "entry_script": args.entry_script,
         "selected_python": args.selected_python,
         "selected_env_root": args.selected_env_root,
         "config_path": args.config_path,
         "model_path": args.model_path,
+        "model_hub_id": args.model_hub_id,
         "dataset_path": args.dataset_path,
+        "dataset_hub_id": args.dataset_hub_id,
+        "dataset_split": args.dataset_split,
         "checkpoint_path": args.checkpoint_path,
         "task_smoke_cmd": args.task_smoke_cmd,
         "allow_network": args.allow_network,
@@ -160,10 +165,15 @@ def run_pipeline_pass(
         "--output-json",
         str(paths["target_json"]),
     ]
+    maybe_add(discover_args, "--framework-hint", args.framework_hint)
+    maybe_add(discover_args, "--cann-path", args.cann_path)
     maybe_add(discover_args, "--entry-script", args.entry_script)
     maybe_add(discover_args, "--config-path", args.config_path)
     maybe_add(discover_args, "--model-path", args.model_path)
+    maybe_add(discover_args, "--model-hub-id", args.model_hub_id)
     maybe_add(discover_args, "--dataset-path", args.dataset_path)
+    maybe_add(discover_args, "--dataset-hub-id", args.dataset_hub_id)
+    maybe_add(discover_args, "--dataset-split", args.dataset_split)
     maybe_add(discover_args, "--checkpoint-path", args.checkpoint_path)
     maybe_add(discover_args, "--selected-python", selected_python)
     maybe_add(discover_args, "--selected-env-root", selected_env_root)
@@ -295,6 +305,7 @@ def run_fix_plan_and_execution(
                 "--confirm-path-edit",
                 "--confirm-create-env",
                 "--confirm-framework-repair",
+                "--confirm-asset-repair",
             ]
         )
 
@@ -385,6 +396,8 @@ def main() -> int:
     parser.add_argument("--working-dir", required=True, help="workspace root")
     parser.add_argument("--output-dir", help="output directory for readiness artifacts (defaults to <working_dir>/out)")
     parser.add_argument("--target", default="auto", help="training, inference, or auto")
+    parser.add_argument("--framework-hint", help="explicit framework preference such as mindspore or pta")
+    parser.add_argument("--cann-path", help="explicit CANN root or set_env.sh path")
     parser.add_argument("--mode", choices=("check", "fix", "auto"), help="check, fix, or auto")
     parser.add_argument("--check", action="store_true", help="alias for --mode check")
     parser.add_argument("--fix", action="store_true", help="alias for --mode fix")
@@ -394,7 +407,10 @@ def main() -> int:
     parser.add_argument("--selected-env-root", help="explicit environment root for the workspace")
     parser.add_argument("--config-path", help="explicit config path")
     parser.add_argument("--model-path", help="explicit model path")
+    parser.add_argument("--model-hub-id", help="explicit Hugging Face model repo ID")
     parser.add_argument("--dataset-path", help="explicit dataset path")
+    parser.add_argument("--dataset-hub-id", help="explicit Hugging Face dataset repo ID")
+    parser.add_argument("--dataset-split", help="explicit dataset split for remote dataset download")
     parser.add_argument("--checkpoint-path", help="explicit checkpoint path")
     parser.add_argument("--task-smoke-cmd", help="explicit minimal task smoke command")
     parser.add_argument("--allow-network", action="store_true", help="allow network-dependent remediation planning")

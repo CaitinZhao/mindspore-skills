@@ -52,6 +52,75 @@ def test_discover_execution_target_finds_training_script(tmp_path: Path):
     assert target["confidence"] in {"medium", "high"}
 
 
+def test_discover_execution_target_prefers_explicit_framework_hint(tmp_path: Path):
+    (tmp_path / "train.py").write_text(
+        "import mindspore as ms\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "target.json"
+
+    run_script(
+        "discover_execution_target.py",
+        "--working-dir",
+        str(tmp_path),
+        "--framework-hint",
+        "pta",
+        "--output-json",
+        str(output),
+    )
+    target = json.loads(output.read_text(encoding="utf-8"))
+    assert target["framework_path"] == "pta"
+    assert target["framework_hint"] == "pta"
+    assert "explicit framework_hint input provided" in target["evidence"]
+    assert any(
+        "local workspace evidence suggests mindspore, but explicit framework hint requested pta" in item
+        for item in target["evidence"]
+    )
+
+
+def test_discover_execution_target_records_explicit_cann_path(tmp_path: Path):
+    output = tmp_path / "target.json"
+    cann_root = tmp_path / "custom-cann" / "8.5.0"
+
+    run_script(
+        "discover_execution_target.py",
+        "--working-dir",
+        str(tmp_path),
+        "--cann-path",
+        str(cann_root),
+        "--output-json",
+        str(output),
+    )
+    target = json.loads(output.read_text(encoding="utf-8"))
+    assert target["cann_path"] == str(cann_root)
+    assert "explicit cann_path input provided" in target["evidence"]
+
+
+def test_discover_execution_target_applies_qwen_huggingface_recipe(tmp_path: Path):
+    output = tmp_path / "target.json"
+
+    run_script(
+        "discover_execution_target.py",
+        "--working-dir",
+        str(tmp_path),
+        "--target",
+        "training",
+        "--model-hub-id",
+        "qwen3-0.6b",
+        "--output-json",
+        str(output),
+    )
+    target = json.loads(output.read_text(encoding="utf-8"))
+    assert target["target_type"] == "training"
+    assert target["entry_script"] == ".readiness-assets/examples/train_qwen3_0_6b_hf.py"
+    assert target["model_hub_id"] == "Qwen/Qwen3-0.6B"
+    assert target["dataset_hub_id"] == "karthiksagarn/astro_horoscope"
+    assert target["dataset_split"] == "train"
+    assert target["reference_transformers_version"] == "4.57.6"
+    assert target["example_recipe_id"] == "qwen3-0.6b-hf-training"
+    assert any(item.get("package_name") == "transformers==4.57.6" for item in target["expected_runtime_profile"])
+
+
 def test_resolve_selected_python_prefers_explicit_python(tmp_path: Path):
     output = tmp_path / "selected-python.json"
 
@@ -249,6 +318,70 @@ def test_build_dependency_closure_tracks_required_assets(tmp_path: Path):
     assert closure["layers"]["workspace_assets"]["entry_script"]["exists"] is True
     assert closure["layers"]["workspace_assets"]["model_path"]["exists"] is True
     assert closure["complete_for_static_validation"] is True
+
+
+def test_build_dependency_closure_uses_recipe_runtime_profile_without_entry_script(tmp_path: Path):
+    target_path = tmp_path / "target.json"
+    closure_path = tmp_path / "closure.json"
+    target_path.write_text(
+        json.dumps(
+            {
+                "working_dir": str(tmp_path),
+                "target_type": "training",
+                "entry_script": ".readiness-assets/examples/train_qwen3_0_6b_hf.py",
+                "framework_path": "pta",
+                "selected_python": sys.executable,
+                "model_path": ".readiness-assets/models/Qwen__Qwen3-0.6B",
+                "model_hub_id": "Qwen/Qwen3-0.6B",
+                "dataset_path": ".readiness-assets/datasets/karthiksagarn__astro_horoscope",
+                "dataset_hub_id": "karthiksagarn/astro_horoscope",
+                "dataset_split": "train",
+                "expected_runtime_profile": [
+                    {
+                        "import_name": "datasets",
+                        "package_name": "datasets",
+                        "required_for": "bundled-example",
+                        "reason": "example dataset loader",
+                    },
+                    {
+                        "import_name": "transformers",
+                        "package_name": "transformers==4.57.6",
+                        "required_for": "bundled-example",
+                        "reason": "example transformers pin",
+                    },
+                    {
+                        "import_name": "sentencepiece",
+                        "package_name": "sentencepiece",
+                        "required_for": "bundled-example",
+                        "reason": "qwen tokenizer dependency",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    run_script(
+        "build_dependency_closure.py",
+        "--target-json",
+        str(target_path),
+        "--output-json",
+        str(closure_path),
+    )
+    closure = json.loads(closure_path.read_text(encoding="utf-8"))
+    runtime_layer = closure["layers"]["runtime_dependencies"]
+    required_imports = runtime_layer["required_imports"]
+    implicit_profile = runtime_layer["implicit_dependency_profile"]
+    workspace = closure["layers"]["workspace_assets"]
+
+    assert "datasets" in required_imports
+    assert "transformers" in required_imports
+    assert "sentencepiece" in required_imports
+    assert "accelerate" in required_imports
+    assert any(item["package_name"] == "transformers==4.57.6" for item in implicit_profile)
+    assert workspace["entry_script"]["source"] == "bundled-example"
+    assert workspace["model_path"]["asset_provider"] == "huggingface"
+    assert workspace["dataset_path"]["asset_provider"] == "huggingface"
 
 
 def test_build_dependency_closure_adds_ascend_hidden_runtime_profile_for_mindspore(tmp_path: Path):
@@ -552,6 +685,278 @@ raise SystemExit(completed.returncode)
     assert framework["smoke_prerequisite"]["status"] == "passed"
 
 
+def test_build_dependency_closure_marks_broken_detected_ascend_env_script(tmp_path: Path):
+    if os.name == "nt" or shutil.which("bash") is None:
+        return
+
+    (tmp_path / "infer.py").write_text(
+        "import torch\nimport torch_npu\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "model").mkdir()
+
+    fake_python = tmp_path / ".venv" / "bin" / "python"
+    fake_python.parent.mkdir(parents=True)
+    fake_python.write_text(
+        """#!/usr/bin/env python3
+import json
+import subprocess
+import sys
+
+if len(sys.argv) >= 3 and sys.argv[1] == "-c":
+    code = sys.argv[2]
+    if "platform.python_version" in code and "version_info" in code:
+        print(json.dumps({"version_info": [3, 10, 0], "version": "3.10.0"}))
+        raise SystemExit(0)
+    mode = sys.argv[3]
+    payload = json.loads(sys.argv[4])
+    if mode == "import":
+        packages = payload.get("packages", [])
+        available = {"torch"}
+        print(json.dumps({name: name in available for name in packages}))
+        raise SystemExit(0)
+    if mode == "framework_smoke":
+        print(json.dumps({"success": False, "details": [], "error": "missing runtime"}))
+        raise SystemExit(0)
+
+completed = subprocess.run([sys.executable, *sys.argv[1:]])
+raise SystemExit(completed.returncode)
+""",
+        encoding="utf-8",
+    )
+    fake_python.chmod(fake_python.stat().st_mode | 0o111)
+
+    ascend_home = tmp_path / "ascend"
+    ascend_home.mkdir()
+    (ascend_home / "set_env.sh").write_text(
+        "source /definitely/missing/setenv.bash\n",
+        encoding="utf-8",
+    )
+
+    target_path = tmp_path / "target.json"
+    closure_path = tmp_path / "closure.json"
+    target_path.write_text(
+        json.dumps(
+            {
+                "working_dir": str(tmp_path),
+                "target_type": "inference",
+                "entry_script": "infer.py",
+                "framework_path": "pta",
+                "model_path": "model",
+                "launch_cmd": "python infer.py",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    env = dict(os.environ)
+    env["ASCEND_HOME_PATH"] = str(ascend_home)
+
+    run_script(
+        "build_dependency_closure.py",
+        "--target-json",
+        str(target_path),
+        "--output-json",
+        str(closure_path),
+        env=env,
+    )
+    closure = json.loads(closure_path.read_text(encoding="utf-8"))
+    system = closure["layers"]["system"]
+
+    assert system["ascend_env_script_present"] is True
+    assert system["probe_env_source"] == "sourced_script_failed"
+    assert system["probe_env_error"]
+
+
+def test_build_dependency_closure_prefers_explicit_cann_path_for_custom_install(tmp_path: Path):
+    if os.name == "nt" or shutil.which("bash") is None:
+        return
+
+    (tmp_path / "infer.py").write_text(
+        "import torch\nimport torch_npu\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "model").mkdir()
+
+    fake_python = tmp_path / ".venv" / "bin" / "python"
+    fake_python.parent.mkdir(parents=True)
+    fake_python.write_text(
+        """#!/usr/bin/env python3
+import json
+import os
+import subprocess
+import sys
+
+if len(sys.argv) >= 3 and sys.argv[1] == "-c":
+    code = sys.argv[2]
+    if "platform.python_version" in code and "version_info" in code:
+        print(json.dumps({"version_info": [3, 10, 0], "version": "3.10.0"}))
+        raise SystemExit(0)
+    mode = sys.argv[3]
+    payload = json.loads(sys.argv[4])
+    runtime_ready = bool(os.environ.get("ASCEND_HOME_PATH")) and bool(os.environ.get("ASCEND_OPP_PATH"))
+    if mode == "import":
+        packages = payload.get("packages", [])
+        available = {"torch", "torch_npu"} if runtime_ready else {"torch"}
+        print(json.dumps({name: name in available for name in packages}))
+        raise SystemExit(0)
+    if mode == "framework_smoke":
+        print(json.dumps({"success": runtime_ready, "details": ["runtime ready"] if runtime_ready else [], "error": None if runtime_ready else "missing runtime"}))
+        raise SystemExit(0)
+
+completed = subprocess.run([sys.executable, *sys.argv[1:]])
+raise SystemExit(completed.returncode)
+""",
+        encoding="utf-8",
+    )
+    fake_python.chmod(fake_python.stat().st_mode | 0o111)
+
+    cann_root = tmp_path / "cann_custom_path" / "8.5.0"
+    toolkit_root = cann_root / "ascend-toolkit"
+    (toolkit_root / "opp").mkdir(parents=True)
+    (toolkit_root / "runtime" / "lib64").mkdir(parents=True)
+    (toolkit_root / "set_env.sh").write_text(
+        "\n".join(
+            [
+                f'export ASCEND_HOME_PATH="{toolkit_root}"',
+                f'export ASCEND_OPP_PATH="{toolkit_root / "opp"}"',
+                f'export LD_LIBRARY_PATH="{toolkit_root / "runtime" / "lib64"}:$LD_LIBRARY_PATH"',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    target_path = tmp_path / "target.json"
+    closure_path = tmp_path / "closure.json"
+    target_path.write_text(
+        json.dumps(
+            {
+                "working_dir": str(tmp_path),
+                "target_type": "inference",
+                "entry_script": "infer.py",
+                "framework_path": "pta",
+                "model_path": "model",
+                "launch_cmd": "python infer.py",
+                "cann_path": str(cann_root),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    run_script(
+        "build_dependency_closure.py",
+        "--target-json",
+        str(target_path),
+        "--output-json",
+        str(closure_path),
+    )
+    closure = json.loads(closure_path.read_text(encoding="utf-8"))
+    system = closure["layers"]["system"]
+    framework = closure["layers"]["framework"]
+
+    assert system["ascend_env_script_path"] == str(toolkit_root / "set_env.sh")
+    assert system["ascend_env_selection_source"] == "bounded_search"
+    assert system["cann_path_input"] == str(cann_root)
+    assert system["probe_env_source"] == "sourced_script"
+    assert framework["import_probes"]["torch_npu"] is True
+
+
+def test_build_dependency_closure_uses_bounded_search_for_custom_home_install(tmp_path: Path):
+    if os.name == "nt" or shutil.which("bash") is None:
+        return
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "infer.py").write_text(
+        "import torch\nimport torch_npu\n",
+        encoding="utf-8",
+    )
+    (workspace / "model").mkdir()
+
+    fake_python = workspace / ".venv" / "bin" / "python"
+    fake_python.parent.mkdir(parents=True)
+    fake_python.write_text(
+        """#!/usr/bin/env python3
+import json
+import os
+import subprocess
+import sys
+
+if len(sys.argv) >= 3 and sys.argv[1] == "-c":
+    code = sys.argv[2]
+    if "platform.python_version" in code and "version_info" in code:
+        print(json.dumps({"version_info": [3, 10, 0], "version": "3.10.0"}))
+        raise SystemExit(0)
+    mode = sys.argv[3]
+    payload = json.loads(sys.argv[4])
+    runtime_ready = bool(os.environ.get("ASCEND_HOME_PATH")) and bool(os.environ.get("ASCEND_OPP_PATH"))
+    if mode == "import":
+        packages = payload.get("packages", [])
+        available = {"torch", "torch_npu"} if runtime_ready else {"torch"}
+        print(json.dumps({name: name in available for name in packages}))
+        raise SystemExit(0)
+    if mode == "framework_smoke":
+        print(json.dumps({"success": runtime_ready, "details": ["runtime ready"] if runtime_ready else [], "error": None if runtime_ready else "missing runtime"}))
+        raise SystemExit(0)
+
+completed = subprocess.run([sys.executable, *sys.argv[1:]])
+raise SystemExit(completed.returncode)
+""",
+        encoding="utf-8",
+    )
+    fake_python.chmod(fake_python.stat().st_mode | 0o111)
+
+    home_root = tmp_path / "home"
+    toolkit_root = home_root / "cann_custom_path" / "8.5.0" / "ascend-toolkit"
+    (toolkit_root / "opp").mkdir(parents=True)
+    (toolkit_root / "runtime" / "lib64").mkdir(parents=True)
+    (toolkit_root / "set_env.sh").write_text(
+        "\n".join(
+            [
+                f'export ASCEND_HOME_PATH="{toolkit_root}"',
+                f'export ASCEND_OPP_PATH="{toolkit_root / "opp"}"',
+                f'export LD_LIBRARY_PATH="{toolkit_root / "runtime" / "lib64"}:$LD_LIBRARY_PATH"',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    target_path = tmp_path / "target.json"
+    closure_path = tmp_path / "closure.json"
+    target_path.write_text(
+        json.dumps(
+            {
+                "working_dir": str(workspace),
+                "target_type": "inference",
+                "entry_script": "infer.py",
+                "framework_path": "pta",
+                "model_path": "model",
+                "launch_cmd": "python infer.py",
+            }
+        ),
+        encoding="utf-8",
+    )
+    env = dict(os.environ)
+    env["HOME"] = str(home_root)
+
+    run_script(
+        "build_dependency_closure.py",
+        "--target-json",
+        str(target_path),
+        "--output-json",
+        str(closure_path),
+        env=env,
+    )
+    closure = json.loads(closure_path.read_text(encoding="utf-8"))
+    system = closure["layers"]["system"]
+
+    assert system["ascend_env_selection_source"] == "bounded_search"
+    assert system["ascend_env_script_path"] == str(toolkit_root / "set_env.sh")
+    assert system["probe_env_source"] == "sourced_script"
+
+
 def test_collect_readiness_checks_flags_missing_uv_and_missing_entry(tmp_path: Path):
     target_path = tmp_path / "target.json"
     closure_path = tmp_path / "closure.json"
@@ -682,6 +1087,178 @@ def test_collect_readiness_checks_flags_missing_framework_packages(tmp_path: Pat
     by_id = {item["id"]: item for item in checks}
     assert by_id["framework-importability"]["status"] == "block"
     assert by_id["framework-importability"]["category_hint"] == "framework"
+
+
+def test_collect_readiness_checks_marks_huggingface_assets_as_remediable(tmp_path: Path):
+    target_path = tmp_path / "target.json"
+    closure_path = tmp_path / "closure.json"
+    checks_path = tmp_path / "checks.json"
+
+    target_path.write_text(
+        json.dumps(
+            {
+                "target_type": "training",
+                "working_dir": str(tmp_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    closure_path.write_text(
+        json.dumps(
+            {
+                "layers": {
+                    "system": {
+                        "requires_ascend": False,
+                    },
+                    "python_environment": {
+                        "tooling": {
+                            "uv_available": True,
+                            "uv_path": "/usr/bin/uv",
+                        },
+                        "selected_env_root": str(tmp_path / ".venv"),
+                        "selected_python": str(tmp_path / ".venv" / "bin" / "python"),
+                        "selection_status": "selected",
+                        "probe_source": "workspace_env",
+                        "probe_python_path": str(tmp_path / ".venv" / "bin" / "python"),
+                    },
+                    "framework": {
+                        "framework_path": "pta",
+                        "required_packages": [],
+                        "import_probes": {},
+                    },
+                    "runtime_dependencies": {
+                        "required_imports": [],
+                        "import_probes": {},
+                    },
+                    "workspace_assets": {
+                        "entry_script": {
+                            "path": ".readiness-assets/examples/train_qwen3_0_6b_hf.py",
+                            "exists": False,
+                            "required": True,
+                            "source": "bundled-example",
+                            "template_path": str(ROOT / "examples" / "qwen3_0_6b_training_local_assets.py"),
+                            "example_recipe_id": "qwen3-0.6b-hf-training",
+                        },
+                        "model_path": {
+                            "path": ".readiness-assets/models/Qwen__Qwen3-0.6B",
+                            "exists": False,
+                            "required": True,
+                            "asset_provider": "huggingface",
+                            "repo_id": "Qwen/Qwen3-0.6B",
+                            "repo_type": "model",
+                        },
+                        "dataset_path": {
+                            "path": ".readiness-assets/datasets/karthiksagarn__astro_horoscope",
+                            "exists": False,
+                            "required": True,
+                            "asset_provider": "huggingface",
+                            "repo_id": "karthiksagarn/astro_horoscope",
+                            "repo_type": "dataset",
+                            "dataset_split": "train",
+                        },
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    run_script(
+        "collect_readiness_checks.py",
+        "--target-json",
+        str(target_path),
+        "--closure-json",
+        str(closure_path),
+        "--output-json",
+        str(checks_path),
+    )
+    checks = json.loads(checks_path.read_text(encoding="utf-8"))
+    by_id = {item["id"]: item for item in checks}
+    assert by_id["workspace-entry_script"]["category_hint"] == "asset"
+    assert by_id["workspace-entry_script"]["template_path"].endswith("qwen3_0_6b_training_local_assets.py")
+    assert by_id["workspace-model_path"]["category_hint"] == "asset"
+    assert by_id["workspace-model_path"]["asset_repo_id"] == "Qwen/Qwen3-0.6B"
+    assert by_id["workspace-dataset_path"]["category_hint"] == "asset"
+    assert by_id["workspace-dataset_path"]["dataset_split"] == "train"
+
+
+def test_collect_readiness_checks_blocks_broken_ascend_env_script(tmp_path: Path):
+    target_path = tmp_path / "target.json"
+    closure_path = tmp_path / "closure.json"
+    checks_path = tmp_path / "checks.json"
+
+    target_path.write_text(
+        json.dumps(
+            {
+                "target_type": "training",
+                "working_dir": str(tmp_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    closure_path.write_text(
+        json.dumps(
+            {
+                "layers": {
+                    "system": {
+                        "requires_ascend": True,
+                        "device_paths_present": True,
+                        "ascend_env_script_present": True,
+                        "ascend_env_script_path": "/usr/local/Ascend/cann-8.5.0-bak/set_env.sh",
+                        "ascend_env_active": False,
+                        "probe_env_source": "sourced_script_failed",
+                        "probe_env_error": "No such file or directory",
+                    },
+                    "python_environment": {
+                        "tooling": {
+                            "uv_available": True,
+                            "uv_path": "/usr/bin/uv",
+                        },
+                        "selected_env_root": str(tmp_path / ".venv"),
+                        "selected_python": str(tmp_path / ".venv" / "bin" / "python"),
+                        "selection_status": "selected",
+                        "probe_source": "workspace_env",
+                        "probe_python_path": str(tmp_path / ".venv" / "bin" / "python"),
+                    },
+                    "framework": {
+                        "framework_path": "pta",
+                        "required_packages": ["torch", "torch_npu"],
+                        "import_probes": {
+                            "torch": True,
+                            "torch_npu": True,
+                        },
+                        "probe_source": "workspace_env",
+                    },
+                    "runtime_dependencies": {
+                        "required_imports": [],
+                        "import_probes": {},
+                    },
+                    "workspace_assets": {
+                        "entry_script": {"required": True, "exists": True},
+                        "dataset_path": {"required": True, "exists": True},
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    run_script(
+        "collect_readiness_checks.py",
+        "--target-json",
+        str(target_path),
+        "--closure-json",
+        str(closure_path),
+        "--output-json",
+        str(checks_path),
+    )
+    checks = json.loads(checks_path.read_text(encoding="utf-8"))
+    by_id = {item["id"]: item for item in checks}
+    assert by_id["system-device"]["status"] == "ok"
+    assert by_id["system-ascend-env"]["status"] == "block"
+    assert by_id["system-ascend-env"]["category_hint"] == "system"
+    assert any("probe_env_source=sourced_script_failed" in item for item in by_id["system-ascend-env"]["evidence"])
+    assert any("probe_env_error=No such file or directory" in item for item in by_id["system-ascend-env"]["evidence"])
 
 
 def test_collect_readiness_checks_uses_structured_hidden_runtime_package_names(tmp_path: Path):
@@ -1263,6 +1840,76 @@ def test_plan_env_fix_maps_remediable_blockers_to_actions(tmp_path: Path):
     assert plan["actions"][1]["package_names"] == ["mindspore"]
 
 
+def test_plan_env_fix_plans_huggingface_downloads_and_example_scaffold(tmp_path: Path):
+    blockers_path = tmp_path / "normalized.json"
+    closure_path = tmp_path / "closure.json"
+    plan_path = tmp_path / "plan.json"
+
+    blockers_path.write_text(
+        json.dumps(
+            {
+                "blockers_detailed": [
+                    {
+                        "id": "workspace-entry_script",
+                        "category": "asset_remediable",
+                        "summary": "Required training entry script is missing but can be scaffolded from the bundled example recipe.",
+                        "remediable": True,
+                        "template_path": str(ROOT / "examples" / "qwen3_0_6b_training_local_assets.py"),
+                        "asset_kind": "entry_script",
+                        "asset_local_path": ".readiness-assets/examples/train_qwen3_0_6b_hf.py",
+                        "revalidation_scope": ["workspace-assets", "target", "runtime-dependencies"],
+                    },
+                    {
+                        "id": "workspace-model_path",
+                        "category": "asset_remediable",
+                        "summary": "Required asset model_path is missing locally but can be downloaded from Hugging Face.",
+                        "remediable": True,
+                        "asset_kind": "model_path",
+                        "asset_provider": "huggingface",
+                        "asset_repo_id": "Qwen/Qwen3-0.6B",
+                        "asset_local_path": ".readiness-assets/models/Qwen__Qwen3-0.6B",
+                        "revalidation_scope": ["workspace-assets", "task-smoke"],
+                    },
+                    {
+                        "id": "workspace-dataset_path",
+                        "category": "asset_remediable",
+                        "summary": "Required dataset asset is missing locally but can be downloaded from Hugging Face.",
+                        "remediable": True,
+                        "asset_kind": "dataset_path",
+                        "asset_provider": "huggingface",
+                        "asset_repo_id": "karthiksagarn/astro_horoscope",
+                        "asset_local_path": ".readiness-assets/datasets/karthiksagarn__astro_horoscope",
+                        "dataset_split": "train",
+                        "revalidation_scope": ["workspace-assets", "task-smoke"],
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    closure_path.write_text(json.dumps({"layers": {}}, indent=2), encoding="utf-8")
+
+    run_script(
+        "plan_env_fix.py",
+        "--blockers-json",
+        str(blockers_path),
+        "--closure-json",
+        str(closure_path),
+        "--output-json",
+        str(plan_path),
+        "--allow-network",
+    )
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    action_types = [item["action_type"] for item in plan["actions"]]
+    assert action_types == [
+        "scaffold_example_entry_script",
+        "download_huggingface_model_asset",
+        "download_huggingface_dataset_asset",
+    ]
+    assert plan["actions"][1]["allowed"] is True
+    assert plan["actions"][2]["dataset_split"] == "train"
+
+
 def test_execute_env_fix_supports_dry_run_and_path_repair(tmp_path: Path):
     plan_path = tmp_path / "plan.json"
     output_path = tmp_path / "result.json"
@@ -1310,6 +1957,234 @@ def test_execute_env_fix_supports_dry_run_and_path_repair(tmp_path: Path):
     assert executed["results"][0]["status"] == "executed"
     assert "PATH" in profile_path.read_text(encoding="utf-8")
     assert executed["needs_revalidation"] == ["tool-resolution"]
+
+
+def test_execute_env_fix_scaffolds_example_entry_script(tmp_path: Path):
+    plan_path = tmp_path / "plan.json"
+    output_path = tmp_path / "result.json"
+    template_path = tmp_path / "template.py"
+    destination_path = tmp_path / ".readiness-assets" / "examples" / "train_qwen3_0_6b_hf.py"
+    template_path.write_text("print('example')\n", encoding="utf-8")
+    plan_path.write_text(
+        json.dumps(
+            {
+                "actions": [
+                    {
+                        "id": "action-1",
+                        "action_type": "scaffold_example_entry_script",
+                        "allowed": True,
+                        "requires_confirmation": True,
+                        "reason": "scaffold bundled example",
+                        "revalidation_scope": ["workspace-assets", "target"],
+                        "template_path": str(template_path),
+                        "destination_path": str(destination_path),
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    run_script(
+        "execute_env_fix.py",
+        "--plan-json",
+        str(plan_path),
+        "--output-json",
+        str(output_path),
+        "--execute",
+        "--confirm-asset-repair",
+    )
+    result = json.loads(output_path.read_text(encoding="utf-8"))
+    assert result["results"][0]["status"] == "executed"
+    assert destination_path.read_text(encoding="utf-8") == "print('example')\n"
+
+
+def test_execute_env_fix_finds_uv_in_user_local_bin_without_path_refresh(tmp_path: Path):
+    plan_path = tmp_path / "plan.json"
+    output_path = tmp_path / "result.json"
+    home_path = tmp_path / "home"
+    local_bin = home_path / ".local" / "bin"
+    runner_path = local_bin / "uv_runner.py"
+    env_root = tmp_path / ".venv"
+
+    plan_path.write_text(
+        json.dumps(
+            {
+                "actions": [
+                    {
+                        "id": "action-1",
+                        "action_type": "create_or_select_env",
+                        "allowed": True,
+                        "requires_confirmation": True,
+                        "reason": "create workspace environment",
+                        "revalidation_scope": ["python-environment"],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    local_bin.mkdir(parents=True)
+    runner_path.write_text(
+        f"""#!/usr/bin/env python3
+import shutil
+import sys
+from pathlib import Path
+
+REAL_PYTHON = r"{sys.executable}"
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    if len(args) >= 2 and args[0] == "venv":
+        env_root = Path(args[1])
+        if sys.platform == "win32":
+            target = env_root / "Scripts" / "python.exe"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(REAL_PYTHON, target)
+        else:
+            target = env_root / "bin" / "python"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("#!/usr/bin/env python3\\n", encoding="utf-8")
+            target.chmod(target.stat().st_mode | 0o111)
+        return 0
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+""",
+        encoding="utf-8",
+    )
+
+    env = dict(os.environ)
+    env["HOME"] = str(home_path)
+    env["USERPROFILE"] = str(home_path)
+    env["PATH"] = ""
+
+    if os.name == "nt":
+        uv_path = local_bin / "uv.cmd"
+        uv_path.write_text(
+            f'@echo off\r\n"{sys.executable}" "{runner_path}" %*\r\n',
+            encoding="utf-8",
+        )
+    else:
+        uv_path = local_bin / "uv"
+        uv_path.write_text(
+            f"#!{sys.executable}\nfrom uv_runner import main\nraise SystemExit(main())\n",
+            encoding="utf-8",
+        )
+        uv_path.chmod(uv_path.stat().st_mode | 0o111)
+    runner_path.chmod(runner_path.stat().st_mode | 0o111)
+
+    run_script(
+        "execute_env_fix.py",
+        "--plan-json",
+        str(plan_path),
+        "--output-json",
+        str(output_path),
+        "--execute",
+        "--selected-env-root",
+        str(env_root),
+        "--confirm-create-env",
+        env=env,
+    )
+    result = json.loads(output_path.read_text(encoding="utf-8"))
+    assert result["results"][0]["status"] == "executed"
+    assert env_root.exists()
+    if os.name == "nt":
+        assert (env_root / "Scripts" / "python.exe").exists()
+    else:
+        assert (env_root / "bin" / "python").exists()
+
+
+def test_execute_env_fix_downloads_huggingface_assets(tmp_path: Path):
+    plan_path = tmp_path / "plan.json"
+    output_path = tmp_path / "result.json"
+    env_root = tmp_path / ".venv"
+    modules_dir = tmp_path / "fake-modules"
+    uv_dir = tmp_path / "fake-uv"
+    model_dest = tmp_path / ".readiness-assets" / "models" / "Qwen__Qwen3-0.6B"
+    dataset_dest = tmp_path / ".readiness-assets" / "datasets" / "karthiksagarn__astro_horoscope"
+
+    python_path = env_root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(sys.executable, python_path)
+
+    (modules_dir / "huggingface_hub").mkdir(parents=True)
+    (modules_dir / "huggingface_hub" / "__init__.py").write_text(
+        """import json\nimport os\nfrom pathlib import Path\n\ndef snapshot_download(repo_id, local_dir):\n    path = Path(local_dir)\n    path.mkdir(parents=True, exist_ok=True)\n    (path / 'config.json').write_text(json.dumps({'repo_id': repo_id, 'hf_endpoint': os.environ.get('HF_ENDPOINT')}), encoding='utf-8')\n    return str(path)\n""",
+        encoding="utf-8",
+    )
+    (modules_dir / "datasets").mkdir(parents=True)
+    (modules_dir / "datasets" / "__init__.py").write_text(
+        """import json\nimport os\nfrom pathlib import Path\n\nclass _Dataset:\n    def __init__(self, repo_id, split):\n        self.repo_id = repo_id\n        self.split = split\n\n    def save_to_disk(self, local_dir):\n        path = Path(local_dir)\n        path.mkdir(parents=True, exist_ok=True)\n        (path / 'dataset_info.json').write_text(json.dumps({'repo_id': self.repo_id, 'split': self.split, 'hf_endpoint': os.environ.get('HF_ENDPOINT')}), encoding='utf-8')\n\n\ndef load_dataset(repo_id, split=None):\n    return _Dataset(repo_id, split)\n""",
+        encoding="utf-8",
+    )
+
+    uv_dir.mkdir()
+    uv_py = uv_dir / "uv"
+    uv_py.write_text(
+        """#!/usr/bin/env python3\nraise SystemExit(0)\n""",
+        encoding="utf-8",
+    )
+    uv_py.chmod(uv_py.stat().st_mode | 0o111)
+    uv_cmd = uv_dir / "uv.cmd"
+    uv_cmd.write_text(f'@echo off\r\n"{sys.executable}" "%~dp0uv" %*\r\n', encoding="utf-8")
+
+    plan_path.write_text(
+        json.dumps(
+            {
+                "actions": [
+                    {
+                        "id": "action-1",
+                        "action_type": "download_huggingface_model_asset",
+                        "allowed": True,
+                        "requires_confirmation": True,
+                        "reason": "download model asset",
+                        "revalidation_scope": ["workspace-assets", "task-smoke"],
+                        "repo_id": "Qwen/Qwen3-0.6B",
+                        "destination_path": str(model_dest),
+                    },
+                    {
+                        "id": "action-2",
+                        "action_type": "download_huggingface_dataset_asset",
+                        "allowed": True,
+                        "requires_confirmation": True,
+                        "reason": "download dataset asset",
+                        "revalidation_scope": ["workspace-assets", "task-smoke"],
+                        "repo_id": "karthiksagarn/astro_horoscope",
+                        "destination_path": str(dataset_dest),
+                        "dataset_split": "train",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    env = dict(os.environ)
+    env["PATH"] = str(uv_dir) + os.pathsep + env.get("PATH", "")
+    env["PYTHONPATH"] = str(modules_dir)
+
+    run_script(
+        "execute_env_fix.py",
+        "--plan-json",
+        str(plan_path),
+        "--output-json",
+        str(output_path),
+        "--execute",
+        "--selected-env-root",
+        str(env_root),
+        "--confirm-asset-repair",
+        env=env,
+    )
+    result = json.loads(output_path.read_text(encoding="utf-8"))
+    assert [item["status"] for item in result["results"]] == ["executed", "executed"]
+    model_info = json.loads((model_dest / "config.json").read_text(encoding="utf-8"))
+    dataset_info = json.loads((dataset_dest / "dataset_info.json").read_text(encoding="utf-8"))
+    assert model_info["hf_endpoint"] == "https://hf-mirror.com"
+    assert dataset_info["hf_endpoint"] == "https://hf-mirror.com"
 
 
 def test_execute_env_fix_retains_package_level_framework_repair_in_dry_run(tmp_path: Path):
@@ -1618,6 +2493,89 @@ def test_build_readiness_report_guides_against_system_python_when_workspace_env_
     assert "Environment Guidance" in markdown
     assert "system_python_allowed: `false`" in markdown
     assert "Do not use system python or pip" in markdown
+
+
+def test_build_readiness_report_separates_manual_and_auto_blockers(tmp_path: Path):
+    target_path = tmp_path / "target.json"
+    normalized_path = tmp_path / "normalized.json"
+    checks_path = tmp_path / "checks.json"
+    report_json = tmp_path / "report.json"
+    report_md = tmp_path / "report.md"
+
+    target_path.write_text(
+        json.dumps(
+            {
+                "target_type": "training",
+                "entry_script": "train.py",
+                "framework_path": "pta",
+            }
+        ),
+        encoding="utf-8",
+    )
+    normalized_path.write_text(
+        json.dumps(
+            {
+                "blockers": [
+                    "Dataset path is missing.",
+                    "uv is missing from the selected execution path.",
+                ],
+                "warnings": [],
+                "blockers_detailed": [
+                    {
+                        "id": "workspace-dataset-path",
+                        "category": "workspace_manual",
+                        "summary": "Dataset path is missing.",
+                    },
+                    {
+                        "id": "python-uv",
+                        "category": "env_remediable",
+                        "summary": "uv is missing from the selected execution path.",
+                    },
+                ],
+                "warnings_detailed": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    checks_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "workspace-dataset-path",
+                    "status": "block",
+                    "summary": "Dataset path is missing.",
+                },
+                {
+                    "id": "python-uv",
+                    "status": "block",
+                    "summary": "uv is missing from the selected execution path.",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    run_script(
+        "build_readiness_report.py",
+        "--target-json",
+        str(target_path),
+        "--normalized-json",
+        str(normalized_path),
+        "--checks-json",
+        str(checks_path),
+        "--output-json",
+        str(report_json),
+        "--output-md",
+        str(report_md),
+    )
+    envelope, verdict = load_report_pair(report_json)
+    markdown = report_md.read_text(encoding="utf-8")
+    assert envelope["status"] == "partial"
+    assert verdict["status"] == "BLOCKED"
+    assert "manual workspace blockers remain" in verdict["summary"].lower()
+    assert "dataset or config paths first" in verdict["next_action"].lower()
+    assert "## Manual Blockers" in markdown
+    assert "## Auto-Remediable Blockers" in markdown
 
 
 def test_build_readiness_report_downgrades_when_explicit_task_smoke_missing(tmp_path: Path):

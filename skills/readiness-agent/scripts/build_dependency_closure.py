@@ -121,12 +121,33 @@ def extract_runtime_imports(entry_script: Optional[Path]) -> List[str]:
     return found
 
 
+def target_runtime_profile(target: dict) -> List[dict]:
+    profile = target.get("expected_runtime_profile") or []
+    if not isinstance(profile, list):
+        return []
+    result: List[dict] = []
+    for item in profile:
+        if not isinstance(item, dict):
+            continue
+        import_name = str(item.get("import_name") or "").strip()
+        package_name = str(item.get("package_name") or "").strip()
+        if not import_name or not package_name:
+            continue
+        result.append(
+            {
+                "import_name": import_name,
+                "package_name": package_name,
+                "required_for": str(item.get("required_for") or "target-hint").strip() or "target-hint",
+                "reason": str(item.get("reason") or "Runtime dependency derived from target metadata.").strip(),
+            }
+        )
+    return result
+
+
 def transformers_common_runtime_profile(
     entry_script: Optional[Path],
     explicit_imports: List[str],
 ) -> List[dict]:
-    if not entry_script or not entry_script.exists():
-        return []
     if "transformers" not in explicit_imports:
         return []
 
@@ -351,6 +372,7 @@ def build_framework_layer(
 
 
 def build_runtime_layer(
+    target: dict,
     entry_script: Optional[Path],
     framework_path: str,
     system_layer: dict,
@@ -358,7 +380,16 @@ def build_runtime_layer(
     probe_env: Optional[Dict[str, str]] = None,
 ) -> dict:
     explicit_imports = extract_runtime_imports(entry_script)
-    implicit_profile = list(ascend_hidden_runtime_profile(framework_path, system_layer))
+    for item in target_runtime_profile(target):
+        import_name = str(item.get("import_name") or "").strip()
+        if import_name and import_name not in explicit_imports:
+            explicit_imports.append(import_name)
+
+    implicit_profile = list(target_runtime_profile(target))
+    for item in ascend_hidden_runtime_profile(framework_path, system_layer):
+        import_name = str(item.get("import_name") or "").strip()
+        if import_name and all(existing.get("import_name") != import_name for existing in implicit_profile):
+            implicit_profile.append(item)
     for item in transformers_common_runtime_profile(entry_script, explicit_imports):
         import_name = str(item.get("import_name") or "").strip()
         if import_name and all(existing.get("import_name") != import_name for existing in implicit_profile):
@@ -400,6 +431,22 @@ def build_workspace_layer(target: dict, root: Path, target_type: str, entry_scri
 
     dataset_state["required"] = target_type == "training"
     model_state["required"] = True
+    if target.get("example_recipe_id"):
+        entry_state["source"] = "bundled-example"
+        entry_state["template_path"] = target.get("example_template_path")
+        entry_state["example_recipe_id"] = target.get("example_recipe_id")
+        entry_state["reference_transformers_version"] = target.get("reference_transformers_version")
+    if target.get("model_hub_id"):
+        model_state["source"] = "huggingface"
+        model_state["asset_provider"] = "huggingface"
+        model_state["repo_id"] = target.get("model_hub_id")
+        model_state["repo_type"] = "model"
+    if target.get("dataset_hub_id"):
+        dataset_state["source"] = "huggingface"
+        dataset_state["asset_provider"] = "huggingface"
+        dataset_state["repo_id"] = target.get("dataset_hub_id")
+        dataset_state["repo_type"] = "dataset"
+        dataset_state["dataset_split"] = target.get("dataset_split")
 
     return {
         "entry_script": entry_state,
@@ -443,7 +490,7 @@ def build_dependency_closure(target: dict, root: Path) -> dict:
             entry_script = root / entry_script
 
     target_type = target.get("target_type") or "unknown"
-    system_layer = detect_ascend_runtime()
+    system_layer = detect_ascend_runtime(target)
     probe_env, probe_env_source, probe_env_error = resolve_runtime_environment(system_layer)
     system_layer["probe_env_source"] = probe_env_source
     system_layer["probe_env_error"] = probe_env_error
@@ -453,6 +500,7 @@ def build_dependency_closure(target: dict, root: Path) -> dict:
         "python_environment": python_layer,
         "framework": build_framework_layer(target, python_layer, probe_env),
         "runtime_dependencies": build_runtime_layer(
+            target,
             entry_script,
             target.get("framework_path") or "unknown",
             system_layer,

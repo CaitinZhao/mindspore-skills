@@ -30,6 +30,16 @@ inputs:
     default: "auto"
     choices: ["training", "inference", "auto"]
     description: "Intended task target. Auto infers the target from evidence and must downgrade to WARN if ambiguity remains."
+  - name: "framework_hint"
+    type: "enum"
+    required: false
+    default: "auto"
+    choices: ["mindspore", "pta", "mixed", "auto"]
+    description: "Explicit framework preference. Use when the user already knows the target should follow the MindSpore, PTA, or mixed path."
+  - name: "cann_path"
+    type: "path"
+    required: false
+    description: "Explicit CANN root or set_env.sh path. When provided, readiness uses it before bounded search."
   - name: "mode"
     type: "enum"
     required: false
@@ -56,10 +66,22 @@ inputs:
     type: "path"
     required: false
     description: "Explicit model directory or model artifact path when already known."
+  - name: "model_hub_id"
+    type: "string"
+    required: false
+    description: "Explicit Hugging Face model repo ID when readiness should materialize a local model asset snapshot."
   - name: "dataset_path"
     type: "path"
     required: false
     description: "Explicit dataset path when the intended target requires it."
+  - name: "dataset_hub_id"
+    type: "string"
+    required: false
+    description: "Explicit Hugging Face dataset repo ID when readiness should materialize a local dataset asset snapshot."
+  - name: "dataset_split"
+    type: "string"
+    required: false
+    description: "Optional dataset split to download from a remote dataset source before local readiness revalidation."
   - name: "checkpoint_path"
     type: "path"
     required: false

@@ -62,7 +62,11 @@ The MVP `env-fix` policy allows these action families:
 - create or reuse a selected Python environment
 - install missing runtime Python dependencies
 - install or replace framework packages inside the selected environment
+- scaffold a bundled example entry script when explicit target evidence
+  justifies it
 - download a model or required asset only when network use is allowed and the
+  action is confirmed
+- download a required dataset asset only when network use is allowed and the
   action is confirmed
 
 These actions must remain target-scoped and closure-justified.

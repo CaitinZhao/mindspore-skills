@@ -2,10 +2,14 @@
 import argparse
 import json
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from python_selection import resolve_selected_python
 
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+SKILL_ROOT = SCRIPT_DIR.parent
+EXAMPLES_DIR = SKILL_ROOT / "examples"
 
 TRAINING_SCRIPT_NAMES = {
     "train.py",
@@ -23,6 +27,50 @@ INFERENCE_SCRIPT_NAMES = {
 SCRIPT_SUFFIXES = {".py", ".sh", ".ipynb"}
 CONFIG_SUFFIXES = {".yaml", ".yml", ".json"}
 
+MODEL_HUB_ALIASES = {
+    "qwen3-0.6b": "Qwen/Qwen3-0.6B",
+    "qwen/qwen3-0.6b": "Qwen/Qwen3-0.6B",
+}
+
+DATASET_HUB_ALIASES = {
+    "karthiksagarn/astro_horoscope": "karthiksagarn/astro_horoscope",
+}
+
+KNOWN_EXAMPLE_RECIPES = {
+    ("training", "Qwen/Qwen3-0.6B"): {
+        "recipe_id": "qwen3-0.6b-hf-training",
+        "framework_path": "pta",
+        "entry_script": ".readiness-assets/examples/train_qwen3_0_6b_hf.py",
+        "template_path": str(EXAMPLES_DIR / "qwen3_0_6b_training_local_assets.py"),
+        "model_hub_id": "Qwen/Qwen3-0.6B",
+        "model_path": ".readiness-assets/models/Qwen__Qwen3-0.6B",
+        "dataset_hub_id": "karthiksagarn/astro_horoscope",
+        "dataset_path": ".readiness-assets/datasets/karthiksagarn__astro_horoscope",
+        "dataset_split": "train",
+        "reference_transformers_version": "4.57.6",
+        "runtime_profile": [
+            {
+                "import_name": "datasets",
+                "package_name": "datasets",
+                "required_for": "bundled-example",
+                "reason": "The bundled Qwen3-0.6B training example loads a Hugging Face dataset snapshot.",
+            },
+            {
+                "import_name": "transformers",
+                "package_name": "transformers==4.57.6",
+                "required_for": "bundled-example",
+                "reason": "The bundled Qwen3-0.6B training example is pinned to transformers 4.57.6.",
+            },
+            {
+                "import_name": "sentencepiece",
+                "package_name": "sentencepiece",
+                "required_for": "bundled-example",
+                "reason": "Qwen tokenizers commonly rely on sentencepiece when restoring tokenizer assets.",
+            },
+        ],
+    }
+}
+
 
 def read_text(path: Path) -> str:
     try:
@@ -38,6 +86,54 @@ def normalize_target_hint(value: Optional[str]) -> Optional[str]:
     if value in {"training", "inference"}:
         return value
     return None
+
+
+def normalize_framework_hint(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    value = value.strip().lower()
+    if value in {"mindspore", "pta", "mixed"}:
+        return value
+    return None
+
+
+def normalize_model_hub_id(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    return MODEL_HUB_ALIASES.get(raw.lower(), raw)
+
+
+def normalize_dataset_hub_id(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    return DATASET_HUB_ALIASES.get(raw.lower(), raw)
+
+
+def default_asset_path(kind: str, repo_id: str) -> str:
+    safe = repo_id.replace("/", "__").replace("\\", "__").replace(":", "_").replace(" ", "_")
+    return f".readiness-assets/{kind}/{safe}"
+
+
+def resolve_example_recipe(
+    target_type: Optional[str],
+    model_hub_id: Optional[str],
+    dataset_hub_id: Optional[str],
+) -> Optional[dict]:
+    if not target_type or not model_hub_id:
+        return None
+    recipe = KNOWN_EXAMPLE_RECIPES.get((target_type, model_hub_id))
+    if not recipe:
+        return None
+    expected_dataset = recipe.get("dataset_hub_id")
+    if dataset_hub_id and expected_dataset and dataset_hub_id != expected_dataset:
+        return None
+    return dict(recipe)
 
 
 def infer_framework(text: str) -> Optional[str]:
@@ -213,10 +309,15 @@ def choose_config(configs: List[Path], entry_script: Optional[Path], root: Path)
 def build_execution_target(
     root: Path,
     target_hint: Optional[str],
+    framework_hint: Optional[str],
+    cann_path_hint: Optional[Path],
     entry_script_hint: Optional[Path],
     config_path_hint: Optional[Path],
     model_path_hint: Optional[Path],
+    model_hub_id_hint: Optional[str],
     dataset_path_hint: Optional[Path],
+    dataset_hub_id_hint: Optional[str],
+    dataset_split_hint: Optional[str],
     checkpoint_path_hint: Optional[Path],
     task_smoke_cmd_hint: Optional[str],
     selected_python_hint: Optional[str],
@@ -226,6 +327,9 @@ def build_execution_target(
     candidate_scripts = find_candidate_scripts(root)
     configs = find_candidate_configs(root)
     markers = find_model_markers(root)
+    requested_framework = normalize_framework_hint(framework_hint)
+    model_hub_id = normalize_model_hub_id(model_hub_id_hint)
+    dataset_hub_id = normalize_dataset_hub_id(dataset_hub_id_hint)
     python_selection = resolve_selected_python(
         root=root,
         selected_python=selected_python_hint,
@@ -233,14 +337,25 @@ def build_execution_target(
     )
 
     chosen_script: Optional[Path] = None
-    framework_path = None
+    local_framework = None
     discovered_target = target_hint
+
+    if requested_framework:
+        evidence.append("explicit framework_hint input provided")
+    if cann_path_hint:
+        evidence.append("explicit cann_path input provided")
+    if model_hub_id:
+        evidence.append("explicit model_hub_id input provided")
+    if dataset_hub_id:
+        evidence.append("explicit dataset_hub_id input provided")
+    if dataset_split_hint:
+        evidence.append("explicit dataset_split input provided")
 
     if entry_script_hint:
         chosen_script = entry_script_hint if entry_script_hint.is_absolute() else (root / entry_script_hint)
         evidence.append("explicit entry_script input provided")
         script_text = read_text(chosen_script)
-        framework_path = infer_framework(script_text)
+        local_framework = infer_framework(script_text)
         discovered_target = discovered_target or score_script(chosen_script, root)[3]
     else:
         ranked: List[Tuple[int, Path, List[str], Optional[str], Optional[str]]] = []
@@ -253,11 +368,23 @@ def build_execution_target(
         if ranked:
             best = ranked[0]
             chosen_script = best[1]
-            framework_path = best[3]
+            local_framework = best[3]
             discovered_target = discovered_target or best[4]
             evidence.extend(best[2])
             if len(ranked) > 1 and ranked[1][0] == best[0]:
                 evidence.append("multiple candidate scripts have equal evidence strength")
+
+    recipe = resolve_example_recipe(discovered_target or target_hint, model_hub_id, dataset_hub_id)
+    if recipe and not chosen_script:
+        chosen_script = root / str(recipe["entry_script"])
+        evidence.append(f"bundled example recipe selected: {recipe['recipe_id']}")
+        discovered_target = discovered_target or "training"
+
+    framework_path = requested_framework or local_framework or (recipe.get("framework_path") if recipe else None)
+    if requested_framework and local_framework and requested_framework != local_framework:
+        evidence.append(
+            f"local workspace evidence suggests {local_framework}, but explicit framework hint requested {requested_framework}"
+        )
 
     config_path = None
     if config_path_hint:
@@ -276,6 +403,27 @@ def build_execution_target(
         model_path = infer_model_path(markers, root, chosen_script)
         if model_path:
             evidence.append("model path inferred from workspace model markers")
+        elif recipe:
+            model_path = str(recipe["model_path"])
+            evidence.append("default local model path derived from bundled example recipe")
+        elif model_hub_id:
+            model_path = default_asset_path("models", model_hub_id)
+            evidence.append("default local model path derived from model_hub_id")
+
+    dataset_path = None
+    if dataset_path_hint:
+        dataset_path = str(dataset_path_hint)
+        evidence.append("explicit dataset_path input provided")
+    elif recipe:
+        dataset_path = str(recipe["dataset_path"])
+        evidence.append("default local dataset path derived from bundled example recipe")
+    elif dataset_hub_id:
+        dataset_path = default_asset_path("datasets", dataset_hub_id)
+        evidence.append("default local dataset path derived from dataset_hub_id")
+
+    dataset_split = dataset_split_hint or (str(recipe["dataset_split"]) if recipe and recipe.get("dataset_split") else None)
+    model_hub_id = model_hub_id or (str(recipe["model_hub_id"]) if recipe and recipe.get("model_hub_id") else None)
+    dataset_hub_id = dataset_hub_id or (str(recipe["dataset_hub_id"]) if recipe and recipe.get("dataset_hub_id") else None)
 
     if target_hint:
         evidence.append("explicit target input provided")
@@ -300,9 +448,14 @@ def build_execution_target(
         "entry_script": str(chosen_script.relative_to(root)) if chosen_script else None,
         "launch_cmd": launch_cmd,
         "framework_path": framework_path or "unknown",
+        "framework_hint": requested_framework or "auto",
+        "cann_path": str(cann_path_hint) if cann_path_hint else None,
         "config_path": config_path,
         "model_path": model_path,
-        "dataset_path": str(dataset_path_hint) if dataset_path_hint else None,
+        "model_hub_id": model_hub_id,
+        "dataset_path": dataset_path,
+        "dataset_hub_id": dataset_hub_id,
+        "dataset_split": dataset_split,
         "checkpoint_path": str(checkpoint_path_hint) if checkpoint_path_hint else None,
         "selected_python": python_selection.get("selected_python"),
         "selected_env_root": python_selection.get("selected_env_root"),
@@ -312,6 +465,11 @@ def build_execution_target(
         "selected_python_version": python_selection.get("python_version"),
         "task_smoke_cmd": task_smoke_cmd_hint,
         "output_path": None,
+        "asset_provider": "huggingface" if model_hub_id or dataset_hub_id else None,
+        "example_recipe_id": recipe.get("recipe_id") if recipe else None,
+        "example_template_path": recipe.get("template_path") if recipe else None,
+        "reference_transformers_version": recipe.get("reference_transformers_version") if recipe else None,
+        "expected_runtime_profile": recipe.get("runtime_profile") if recipe else [],
         "evidence": evidence,
         "confidence": confidence,
         "candidate_counts": {
@@ -334,10 +492,15 @@ def main() -> int:
     )
     parser.add_argument("--working-dir", required=True, help="workspace root")
     parser.add_argument("--target", default="auto", help="training, inference, or auto")
+    parser.add_argument("--framework-hint", help="explicit framework preference such as mindspore or pta")
+    parser.add_argument("--cann-path", help="explicit CANN root or set_env.sh path")
     parser.add_argument("--entry-script", help="explicit entry script path")
     parser.add_argument("--config-path", help="explicit config path")
     parser.add_argument("--model-path", help="explicit model path")
+    parser.add_argument("--model-hub-id", help="explicit Hugging Face model repo ID")
     parser.add_argument("--dataset-path", help="explicit dataset path")
+    parser.add_argument("--dataset-hub-id", help="explicit Hugging Face dataset repo ID")
+    parser.add_argument("--dataset-split", help="explicit dataset split for remote dataset download")
     parser.add_argument("--checkpoint-path", help="explicit checkpoint path")
     parser.add_argument("--selected-python", help="explicit Python interpreter for the workspace")
     parser.add_argument("--selected-env-root", help="explicit environment root for the workspace")
@@ -349,10 +512,15 @@ def main() -> int:
     result = build_execution_target(
         root=root,
         target_hint=normalize_target_hint(args.target),
+        framework_hint=args.framework_hint,
+        cann_path_hint=Path(args.cann_path) if args.cann_path else None,
         entry_script_hint=Path(args.entry_script) if args.entry_script else None,
         config_path_hint=Path(args.config_path) if args.config_path else None,
         model_path_hint=Path(args.model_path) if args.model_path else None,
+        model_hub_id_hint=args.model_hub_id,
         dataset_path_hint=Path(args.dataset_path) if args.dataset_path else None,
+        dataset_hub_id_hint=args.dataset_hub_id,
+        dataset_split_hint=args.dataset_split,
         checkpoint_path_hint=Path(args.checkpoint_path) if args.checkpoint_path else None,
         task_smoke_cmd_hint=args.task_smoke_cmd,
         selected_python_hint=args.selected_python,

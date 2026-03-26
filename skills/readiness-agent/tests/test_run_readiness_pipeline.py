@@ -176,6 +176,95 @@ def test_run_readiness_pipeline_check_does_not_create_workspace_env(tmp_path: Pa
     assert not (workspace / ".venv").exists()
 
 
+def test_run_readiness_pipeline_records_framework_hint(tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "train.py").write_text("import mindspore as ms\n", encoding="utf-8")
+    output_dir = tmp_path / "out"
+
+    run_script(
+        "run_readiness_pipeline.py",
+        "--working-dir",
+        str(workspace),
+        "--output-dir",
+        str(output_dir),
+        "--target",
+        "training",
+        "--framework-hint",
+        "pta",
+        "--mode",
+        "check",
+    )
+
+    inputs = json.loads((output_dir / "meta" / "inputs.json").read_text(encoding="utf-8"))
+    target = json.loads((output_dir / "meta" / "execution-target.json").read_text(encoding="utf-8"))
+
+    assert inputs["framework_hint"] == "pta"
+    assert target["framework_hint"] == "pta"
+    assert target["framework_path"] == "pta"
+
+
+def test_run_readiness_pipeline_records_cann_path(tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    output_dir = tmp_path / "out"
+    cann_root = tmp_path / "custom-cann" / "8.5.0"
+
+    run_script(
+        "run_readiness_pipeline.py",
+        "--working-dir",
+        str(workspace),
+        "--output-dir",
+        str(output_dir),
+        "--target",
+        "training",
+        "--cann-path",
+        str(cann_root),
+        "--mode",
+        "check",
+    )
+
+    inputs = json.loads((output_dir / "meta" / "inputs.json").read_text(encoding="utf-8"))
+    target = json.loads((output_dir / "meta" / "execution-target.json").read_text(encoding="utf-8"))
+
+    assert inputs["cann_path"] == str(cann_root)
+    assert target["cann_path"] == str(cann_root)
+
+
+def test_run_readiness_pipeline_records_huggingface_inputs(tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    output_dir = tmp_path / "out"
+
+    run_script(
+        "run_readiness_pipeline.py",
+        "--working-dir",
+        str(workspace),
+        "--output-dir",
+        str(output_dir),
+        "--target",
+        "training",
+        "--model-hub-id",
+        "Qwen/Qwen3-0.6B",
+        "--dataset-hub-id",
+        "karthiksagarn/astro_horoscope",
+        "--dataset-split",
+        "train",
+        "--mode",
+        "check",
+    )
+
+    inputs = json.loads((output_dir / "meta" / "inputs.json").read_text(encoding="utf-8"))
+    target = json.loads((output_dir / "meta" / "execution-target.json").read_text(encoding="utf-8"))
+
+    assert inputs["model_hub_id"] == "Qwen/Qwen3-0.6B"
+    assert inputs["dataset_hub_id"] == "karthiksagarn/astro_horoscope"
+    assert inputs["dataset_split"] == "train"
+    assert target["model_hub_id"] == "Qwen/Qwen3-0.6B"
+    assert target["dataset_hub_id"] == "karthiksagarn/astro_horoscope"
+    assert target["dataset_split"] == "train"
+
+
 def test_run_readiness_pipeline_auto_creates_default_env_and_reruns(tmp_path: Path, monkeypatch):
     install_fake_uv(tmp_path, monkeypatch)
     workspace = make_workspace(tmp_path)

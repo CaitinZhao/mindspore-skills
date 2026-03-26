@@ -27,6 +27,11 @@ workflow:
 ## Typical Inputs
 
 - code folder or working directory
+- framework hint such as `pta` or `mindspore` if the user already has a
+  concrete preference
+- optional `cann_path` when CANN is installed in a custom location
+- Hugging Face model or dataset repo IDs when the workspace should materialize
+  missing local assets from remote sources
 - intended target or explicit entry script if already known
 - training or inference config, model, dataset, or checkpoint paths if already
   known

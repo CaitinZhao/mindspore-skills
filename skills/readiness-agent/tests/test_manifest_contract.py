@@ -26,9 +26,15 @@ def test_manifest_declares_target_and_fix_inputs():
     assert 'name: "working_dir"' in text
     assert 'name: "target"' in text
     assert 'choices: ["training", "inference", "auto"]' in text
+    assert 'name: "framework_hint"' in text
+    assert 'choices: ["mindspore", "pta", "mixed", "auto"]' in text
+    assert 'name: "cann_path"' in text
     assert 'name: "mode"' in text
     assert 'choices: ["check", "fix", "auto"]' in text
     assert 'name: "selected_python"' in text
+    assert 'name: "model_hub_id"' in text
+    assert 'name: "dataset_hub_id"' in text
+    assert 'name: "dataset_split"' in text
     assert 'name: "selected_env_root"' in text
     assert 'name: "allow_network"' in text
     assert 'name: "fix_scope"' in text

@@ -14,6 +14,18 @@ BLOCKER_CATEGORY_DEFAULTS = {
     "unknown": ("unknown", False, "unknown"),
 }
 
+PASSTHROUGH_FIELDS = (
+    "asset_kind",
+    "asset_provider",
+    "asset_repo_id",
+    "asset_repo_type",
+    "asset_local_path",
+    "dataset_split",
+    "template_path",
+    "example_recipe_id",
+    "reference_transformers_version",
+)
+
 
 def normalize_category(category_hint: Optional[str]) -> Tuple[str, bool, str]:
     if not category_hint:
@@ -63,6 +75,11 @@ def normalize_checks(checks: List[dict]) -> dict:
                 "revalidation_scope": check.get("revalidation_scope") or [],
                 "package_name": check.get("package_name"),
                 "package_names": check.get("package_names") or [],
+                **{
+                    field: check.get(field)
+                    for field in PASSTHROUGH_FIELDS
+                    if check.get(field) is not None
+                },
             }
         )
 

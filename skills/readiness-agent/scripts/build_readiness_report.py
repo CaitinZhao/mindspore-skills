@@ -8,6 +8,7 @@ from uuid import uuid4
 
 
 READY_LEVELS = {"runtime_smoke", "task_smoke"}
+AUTO_REMEDIABLE_CATEGORIES = {"env_remediable", "framework_remediable", "asset_remediable"}
 
 
 def derive_evidence_level(checks: List[dict]) -> str:
@@ -102,6 +103,9 @@ def synthesize_user_result(
     warnings = normalized.get("warnings_detailed", [])
     target_type = target.get("target_type") or "unknown"
     task_smoke_state = interpret_task_smoke_state(target, checks)
+    has_workspace_manual = any(item.get("category") == "workspace_manual" for item in blockers)
+    has_auto_remediable = any(item.get("category") in AUTO_REMEDIABLE_CATEGORIES for item in blockers)
+    has_unknown = any(item.get("category") == "unknown" for item in blockers)
 
     if any(item.get("category") == "system_fatal" for item in blockers):
         return (
@@ -112,17 +116,37 @@ def synthesize_user_result(
         )
     if blockers:
         next_action = "Resolve blockers and rerun readiness."
+        summary = f"{target_type.capitalize()} is blocked because required readiness prerequisites remain unresolved."
         if any(str(item.get("id")) == "python-selected-env" for item in blockers):
             next_action = (
                 "Create or select a workspace-local Python environment first, then rerun readiness. "
                 "Do not use system python or pip for this target."
             )
-        if any(item.get("category") == "workspace_manual" for item in blockers):
-            next_action = "Resolve workspace blockers and rerun readiness."
+            summary = f"{target_type.capitalize()} is blocked because no usable workspace-local Python environment is selected yet."
+        if has_workspace_manual and has_auto_remediable:
+            next_action = (
+                "Resolve manual workspace blockers such as missing dataset or config paths first, "
+                "then rerun readiness to clear any remaining environment blockers."
+            )
+            summary = (
+                f"{target_type.capitalize()} is blocked because manual workspace blockers remain, "
+                "and additional environment remediation is still required."
+            )
+        elif has_workspace_manual:
+            next_action = "Resolve workspace blockers such as dataset, config, or checkpoint paths and rerun readiness."
+            summary = f"{target_type.capitalize()} is blocked because manual workspace inputs are still missing."
+        elif has_auto_remediable:
+            next_action = (
+                "Repair the selected workspace environment or missing target-scoped assets in fix/auto mode, then rerun readiness."
+            )
+            summary = f"{target_type.capitalize()} is blocked because target-scoped environment or asset remediation is still required."
+        elif has_unknown:
+            next_action = "Inspect unresolved blockers, confirm the intended target, and rerun readiness."
+            summary = f"{target_type.capitalize()} is blocked because one or more readiness blockers remain unresolved."
         return (
             "BLOCKED",
             False,
-            f"{target_type.capitalize()} is blocked because required readiness prerequisites remain unresolved.",
+            summary,
             next_action,
         )
     if target_type not in {"training", "inference"}:
@@ -323,6 +347,26 @@ def render_markdown(report: dict) -> str:
         lines.extend(["## Blockers", ""])
         for item in report["blockers"]:
             lines.append(f"- {item}")
+        lines.append("")
+    blocker_groups = {
+        "manual": [
+            item for item in report.get("blockers_detailed", [])
+            if item.get("category") == "workspace_manual"
+        ],
+        "auto": [
+            item for item in report.get("blockers_detailed", [])
+            if item.get("category") in AUTO_REMEDIABLE_CATEGORIES
+        ],
+    }
+    if blocker_groups["manual"]:
+        lines.extend(["## Manual Blockers", ""])
+        for item in blocker_groups["manual"]:
+            lines.append(f"- {item.get('summary')}")
+        lines.append("")
+    if blocker_groups["auto"]:
+        lines.extend(["## Auto-Remediable Blockers", ""])
+        for item in blocker_groups["auto"]:
+            lines.append(f"- {item.get('summary')}")
         lines.append("")
     if report["warnings"]:
         lines.extend(["## Warnings", ""])
