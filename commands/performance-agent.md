@@ -21,9 +21,16 @@ Load the `performance-agent` skill and follow its workflow in either:
 - `diagnose` mode for evidence, root cause, and report only
 - `fix` mode for diagnose, fix proposal, confirmation, apply, and verify
 
+The product pipeline prefers structured profiler summaries and reusable report
+artifacts over free-form diagnosis when the required evidence is available.
+
 ## Typical Inputs
 
 - runtime context and symptom description
-- profiler trace data if available
+- profiler trace root or exported profiler directory if available
 - throughput, latency, memory, utilization, or communication symptoms
 - earlier readiness snapshot if available
+- optional before/after metric JSON for validation comparison
+- optional output directory for structured artifacts such as `report.json`,
+  `report.md`, `meta/performance-profile.json`, and
+  `meta/performance-verdict.json`
