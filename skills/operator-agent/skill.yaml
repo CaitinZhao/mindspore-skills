@@ -2,7 +2,7 @@ schema_version: "1.1.0"
 name: "operator-agent"
 display_name: "Op Agent"
 description: "Build framework operators through either custom-access integration or native-framework integration, then verify the result and deliver a plugin, extension, or newly built wheel."
-version: "0.2.0"
+version: "0.3.0"
 
 entry:
   type: "manual"
@@ -68,3 +68,4 @@ tags:
   - "mindspore"
   - "custom-op"
   - "framework"
+  - "aclnn"
