@@ -25,3 +25,15 @@ Every root-cause claim should carry:
 If framework or platform consistency checks narrow the first stable mismatch to
 one operator, load `references/operator-accuracy-triage.md` and finish that
 operator-specific validation before claiming the operator is the root cause.
+
+Before escalating from a mismatching module to an operator claim, verify that
+the module already has aligned:
+
+- inputs
+- weights
+- dtype
+- API parameters
+- actual device placement
+
+Use evidence to justify the claim rather than intuition. Intuition may help you
+choose the next check, but it is not evidence on its own.

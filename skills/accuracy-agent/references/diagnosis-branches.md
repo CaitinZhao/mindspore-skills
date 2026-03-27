@@ -22,10 +22,12 @@ Recommended sequence:
 1. Reconfirm aligned weights and inputs.
 2. Check preprocessing outputs before entering the model.
 3. Compare model outputs at coarse module boundaries.
-4. Narrow to the first mismatching node or operator.
-5. If the mismatch is stable at one operator, switch to operator-level triage
+4. If a module mismatches, verify that its inputs, weights, dtype, and device
+   are already aligned before naming an operator inside it.
+5. Narrow to the first mismatching node or operator.
+6. If the mismatch is stable at one operator, switch to operator-level triage
    before attributing the bug to the implementation.
-6. Only then talk about a concrete fix.
+7. Only then talk about a concrete fix.
 
 Do not:
 
@@ -103,6 +105,8 @@ Recommended sequence:
 2. Check metric and postprocessing definitions next.
 3. If needed, walk backward to the earliest internal mismatch that matters.
 4. Keep the comparison deterministic and scope-limited.
+5. Do not treat a small residual delta as acceptable until you have evidence
+   for its source.
 
 Do not:
 

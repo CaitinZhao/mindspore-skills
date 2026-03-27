@@ -68,6 +68,12 @@ If running in `fix` mode, continue with:
 6. `fix-application`
 7. `fix-verification`
 
+Do not skip workflow stages. If a stage is incomplete, say what evidence is
+still missing before moving on.
+
+When the investigation runs long, restate the current workflow stage before
+writing more debug scripts or running more experiments.
+
 ## Stage 1. Accuracy Analyzer
 
 Collect the evidence and reconstruct an accuracy profile.
@@ -82,15 +88,19 @@ You must try to identify:
   - cross-platform mismatch
   - evaluation regression
 - the trusted baseline or comparison target
-- current and baseline runtime context
+- current and baseline runtime context, including framework versions and actual
+  execution target or device placement when visible
 - model, dataset, config, checkpoint, and precision context
 - the earliest meaningful divergence stage when visible
+- whether determinism controls are enabled for the reduced compare
 - whether the likely issue is centered in:
   - data
   - config
   - model
   - checkpoint
   - dtype or precision
+  - api parameters
+  - device placement
   - framework or platform
 
 Build an `AccuracyProfile` that captures the symptom, baseline, divergence
@@ -106,17 +116,28 @@ At minimum, validate across these groups when relevant:
 - config consistency
 - model consistency
 - checkpoint consistency
-- dtype, precision, and API parameter consistency
+- dtype, precision, API parameter, and device-placement consistency
 - framework or platform consistency
 - metric and evaluation consistency
+
+When useful, read an earlier readiness snapshot such as `env.lock.json` and any
+available run reports. If `factory_root` is provided or discoverable, use
+relevant local Factory assets as supporting evidence.
+
+Use workspace code, bundled references, local run artifacts, relevant Factory
+assets, and targeted experiments as primary evidence. Use intuition only to
+rank the next experiment, not to claim a root cause.
+
+If evidence only narrows to a module or code block, verify the module inputs,
+weights, dtype, and device placement before naming a specific operator.
 
 If the first stable mismatch narrows to a single operator, load
 `references/operator-accuracy-triage.md` before attributing the issue to the
 operator implementation.
 
-When useful, read an earlier readiness snapshot such as `env.lock.json` and any
-available run reports. If `factory_root` is provided or discoverable, use
-relevant local Factory assets as supporting evidence.
+Do not downgrade an unresolved delta to "probably normal cross-platform noise"
+unless the evidence points to a backend or precision explanation and the user
+accepts the residual gap.
 
 Return ranked root-cause candidates with:
 
@@ -197,19 +218,36 @@ Verify the fix against the original accuracy symptom:
 
 - rerun the aligned eval or comparison path
 - compare before/after metrics or outputs
-- record whether the baseline gap narrowed or closed
+- record whether the diagnosed issue is zero-gap, reduced-gap, or still
+  unresolved
+
+For rung-by-rung verification planning or residual-gap handling, load
+`references/validation-ladder.md`.
+
+This skill closes one confirmed accuracy issue per invocation. After the
+diagnosed issue has been fixed and verified, if the overall accuracy gap still
+remains, report the remaining gap explicitly and ask whether to start a new
+workflow for the next issue instead of chaining more guesses into the same run.
 
 ## References
 
 Load these references when needed:
 
-- `references/comparison-scenarios.md`
-- `references/diagnosis-branches.md`
-- `references/tool-selection.md`
-- `references/ascend-precision-notes.md`
-- `references/validation-ladder.md`
-- `references/consistency-validation.md`
-- `references/operator-accuracy-triage.md`
+- `references/comparison-scenarios.md` when the baseline type or comparison
+  target is unclear
+- `references/diagnosis-branches.md` once the first divergence stage is visible
+- `references/tool-selection.md` before choosing capture, compare, or monitor
+  methods
+- `references/debug-script-hygiene.md` when writing or reviewing reduced repro
+  or compare scripts
+- `references/ascend-precision-notes.md` when Ascend backend behavior may
+  explain the mismatch
+- `references/validation-ladder.md` before verification or when a fix leaves a
+  residual gap
+- `references/consistency-validation.md` when turning an `AccuracyProfile` into
+  ranked evidence-backed candidates
+- `references/operator-accuracy-triage.md` only after the mismatch is narrowed
+  to one operator
 
 ## Scripts
 
