@@ -57,13 +57,20 @@ itself is nondeterministic.
 If a module or code block mismatches:
 
 - verify its inputs first
-- verify the corresponding weights
+- verify the corresponding model parameters
+- verify `register_buffer` values, including non-persistent buffers when they
+  affect the path under test
 - verify dtype and casts
 - verify API arguments and defaults
 - verify actual device placement
 
 Only after these checks are clean should you narrow to a specific operator
 inside the module.
+
+When the first stable mismatch is still unknown, prefer module-level or
+stage-level captures first. A trustworthy script that finds the first
+divergence point is more useful than an early operator-specific probe aimed at
+the wrong scope.
 
 ## 5. Keep Scope Tight
 

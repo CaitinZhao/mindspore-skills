@@ -43,9 +43,20 @@ Do not use this skill for:
 ## Hard Rules
 
 - Establish a comparable baseline before making root-cause claims.
+- Evidence comes before conclusion. Every root-cause claim must cite observed
+  evidence and name a validation check or next experiment.
+- When the mismatch source is still unknown, prefer a debug script, hook
+  capture, or other structured compare over intuition-driven guesses.
 - Find the earliest meaningful divergence before suggesting fixes.
+- If the divergence point is still unknown, reduce scope or build a targeted
+  compare until you can name the first stable mismatch or explain why you
+  cannot.
 - Treat data, config, model, checkpoint, dtype, and platform differences as
   first-class evidence.
+- If a module mismatches, verify its inputs, model parameters, `register_buffer`
+  state, dtype, API parameters, and actual device placement before naming an
+  operator inside it. If the inputs already mismatch, walk upstream instead of
+  entering operator triage.
 - If there is no trusted baseline, say so explicitly and reduce the problem to
   the smallest meaningful comparison.
 - Do not claim a fix is confirmed until the user verifies it.
@@ -78,6 +89,13 @@ writing more debug scripts or running more experiments.
 
 Collect the evidence and reconstruct an accuracy profile.
 
+If the baseline type, comparison target, or reduction path is unclear, load
+`references/comparison-scenarios.md` before choosing the first compare.
+When building the initial `AccuracyProfile`, you may also load
+`references/consistency-validation.md` early to avoid missing important
+evidence groups. Use it to shape the profile, not to skip first-divergence
+analysis.
+
 You must try to identify:
 
 - the primary symptom:
@@ -103,12 +121,24 @@ You must try to identify:
   - device placement
   - framework or platform
 
+If the earliest meaningful divergence is not already visible, define the
+smallest compare you will use in Stage 2 to find it. If that compare requires a
+reduced repro, hook script, or tensor compare, load
+`references/debug-script-hygiene.md` before writing or reviewing the script.
+
 Build an `AccuracyProfile` that captures the symptom, baseline, divergence
-stage, evidence, likely domains, and confidence.
+stage, evidence, likely domains, confidence, and the next evidence-producing
+compare when the divergence point is still unknown.
 
 ## Stage 2. Consistency Validator
 
 Validate the most likely accuracy causes from the `AccuracyProfile`.
+
+Load `references/consistency-validation.md` when turning the profile into ranked
+candidates. Once the first divergence stage is visible, load
+`references/diagnosis-branches.md` and follow only the matching branch. If you
+need to write or revise a reduced repro, hook script, or tensor compare in this
+stage, load `references/debug-script-hygiene.md` first.
 
 At minimum, validate across these groups when relevant:
 
@@ -128,12 +158,20 @@ Use workspace code, bundled references, local run artifacts, relevant Factory
 assets, and targeted experiments as primary evidence. Use intuition only to
 rank the next experiment, not to claim a root cause.
 
+If the divergence point is still unknown, your default next action is to reduce
+scope and run a targeted compare until you can name the first stable mismatch.
+
 If evidence only narrows to a module or code block, verify the module inputs,
-weights, dtype, and device placement before naming a specific operator.
+model parameters, `register_buffer` state, dtype, API parameters, and device
+placement before naming a specific operator. If the module inputs already
+mismatch, walk upstream to the producer instead of doing operator-level triage
+inside the mismatching module.
 
 If the first stable mismatch narrows to a single operator, load
 `references/operator-accuracy-triage.md` before attributing the issue to the
-operator implementation.
+operator implementation. Do this only after the surrounding module inputs,
+model parameters, `register_buffer` state, dtype, API parameters, and device
+placement have already been validated.
 
 Do not downgrade an unresolved delta to "probably normal cross-platform noise"
 unless the evidence points to a backend or precision explanation and the user
@@ -231,23 +269,24 @@ workflow for the next issue instead of chaining more guesses into the same run.
 
 ## References
 
-Load these references when needed:
+Use these references as stage-specific navigation, not as a passive checklist:
 
 - `references/comparison-scenarios.md` when the baseline type or comparison
-  target is unclear
+  target is unclear, or when you need help choosing the smallest useful compare
+- `references/debug-script-hygiene.md` before writing or reviewing any reduced
+  repro, hook script, or tensor compare
 - `references/diagnosis-branches.md` once the first divergence stage is visible
+- `references/consistency-validation.md` when turning an `AccuracyProfile` into
+  ranked evidence-backed candidates
 - `references/tool-selection.md` before choosing capture, compare, or monitor
   methods
-- `references/debug-script-hygiene.md` when writing or reviewing reduced repro
-  or compare scripts
 - `references/ascend-precision-notes.md` when Ascend backend behavior may
   explain the mismatch
 - `references/validation-ladder.md` before verification or when a fix leaves a
   residual gap
-- `references/consistency-validation.md` when turning an `AccuracyProfile` into
-  ranked evidence-backed candidates
 - `references/operator-accuracy-triage.md` only after the mismatch is narrowed
-  to one operator
+  to one operator and the surrounding module inputs, model parameters, and
+  buffer state are already aligned
 
 ## Scripts
 
