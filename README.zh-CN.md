@@ -24,6 +24,16 @@
 
 <img src="docs/assets/accuracy_agent.gif" width="720" />
 
+**algorithm-agent**
+
+:x: **问题：** 需要将 MHC（流形约束超参数）特性集成到昇腾 910B 上的 Qwen3 模型中
+
+:keyboard: **输入：** `/fix "integrate MHC feature into Qwen3 model"`
+
+:white_check_mark: **结果：** algorithm-agent 自动分析模型结构，将 MHC 集成到 decoder layer，更新配置，添加测试并验证结果
+
+<img src="docs/assets/algorithm_agent.gif" width="720" />
+
 ---
 
 面向 **AI 基础设施与模型训练工作流** 的 MindSpore Skills。
