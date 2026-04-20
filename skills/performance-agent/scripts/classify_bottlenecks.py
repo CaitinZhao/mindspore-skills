@@ -55,6 +55,9 @@ def classify(
     mfu: Optional[dict] = None,
     cluster: Optional[dict] = None,
     jitter: Optional[dict] = None,
+    fusion: Optional[dict] = None,
+    degradation: Optional[dict] = None,
+    affinity: Optional[dict] = None,
 ) -> list[dict]:
     candidates_by_name: dict[str, dict] = {}
 
@@ -265,6 +268,55 @@ def classify(
                 ),
             )
 
+    # New: Fusion opportunity
+    if fusion and fusion.get("fusion_analysis_available"):
+        opportunities = fusion.get("opportunities", [])
+        if opportunities:
+            top_opp = opportunities[0]
+            combined_share = top_opp.get("combined_share_percent", 0)
+            add_candidate(
+                candidates_by_name,
+                candidate(
+                    "fusion_opportunity",
+                    0.70 if combined_share >= 20 else 0.55,
+                    [f"fusion_type: {top_opp.get('type', 'unknown')}", f"combined_share: {combined_share}%"],
+                    [f"compare {top_opp.get('type', 'unknown')} operator time after fusion"],
+                    [f"apply {top_opp.get('replacement_api', 'fused variant')}", top_opp.get("description", "enable operator fusion")],
+                ),
+            )
+
+    # New: Cluster degradation
+    if degradation and degradation.get("degradation_classification_available"):
+        primary_type = degradation.get("primary_type")
+        sub = degradation.get("sub_classification", {})
+        if primary_type:
+            add_candidate(
+                candidates_by_name,
+                candidate(
+                    "cluster_degradation",
+                    sub.get("confidence", 0.60),
+                    [f"degradation_type: {primary_type}", f"likely_cause: {sub.get('likely_cause', 'unknown')}"],
+                    degradation.get("evidence", [])[:3],
+                    degradation.get("recommended_actions", [])[:3],
+                ),
+            )
+
+    # New: NPU affinity gap
+    if affinity and affinity.get("npu_affinity_analysis_available"):
+        score = affinity.get("overall_affinity_score", 1.0)
+        if score < 0.8:
+            total_findings = affinity.get("total_findings", 0)
+            add_candidate(
+                candidates_by_name,
+                candidate(
+                    "npu_affinity_gap",
+                    0.65 if score < 0.6 else 0.50,
+                    [f"affinity_score: {score}", f"total_findings: {total_findings}"],
+                    ["compare affinity score after applying four-step fixes"],
+                    [affinity.get("priority_fix", "Apply NPU affinity four-step optimization")],
+                ),
+            )
+
     candidates = list(candidates_by_name.values())
 
     if not candidates:
@@ -294,6 +346,9 @@ def main() -> int:
     parser.add_argument("--mfu-json", help="MFU calculation JSON path")
     parser.add_argument("--cluster-json", help="cluster analysis JSON path")
     parser.add_argument("--jitter-json", help="jitter analysis JSON path")
+    parser.add_argument("--fusion-json", help="operator fusion analysis JSON path")
+    parser.add_argument("--degradation-json", help="cluster degradation classification JSON path")
+    parser.add_argument("--affinity-json", help="NPU affinity analysis JSON path")
     parser.add_argument("--output-json", required=True, help="path to write the bottleneck classification JSON")
     args = parser.parse_args()
 
@@ -307,8 +362,11 @@ def main() -> int:
     mfu = load_optional_json(args.mfu_json)
     cluster = load_optional_json(args.cluster_json)
     jitter = load_optional_json(args.jitter_json)
+    fusion = load_optional_json(args.fusion_json)
+    degradation = load_optional_json(args.degradation_json)
+    affinity = load_optional_json(args.affinity_json)
 
-    ranked = classify(profile, step, communication, memory, input_summary, trace_gaps, hotspot, mfu, cluster, jitter)
+    ranked = classify(profile, step, communication, memory, input_summary, trace_gaps, hotspot, mfu, cluster, jitter, fusion, degradation, affinity)
     report = {
         "schema_version": "performance-agent/0.1",
         "skill": "performance-agent",

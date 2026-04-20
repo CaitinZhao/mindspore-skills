@@ -382,6 +382,144 @@ def _jitter_rules(
     return suggestions
 
 
+def _fusion_rules(
+    fusion_json: Optional[dict],
+) -> list[dict]:
+    """Generate operator fusion optimization suggestions."""
+    suggestions = []
+
+    if not fusion_json or not fusion_json.get("fusion_analysis_available"):
+        return suggestions
+
+    for opp in fusion_json.get("opportunities", []):
+        fusion_type = opp.get("type", "")
+        share = opp.get("combined_share_percent", 0)
+        priority = "high" if share >= 20 else "medium"
+
+        code_examples = {}
+        if fusion_type == "flash_attention":
+            code_examples["pytorch"] = (
+                "attn_output = torch_npu.npu_fusion_attention(\n"
+                "    q, k, v, head_num=num_heads,\n"
+                "    input_layout='BNSD', keep_prob=1.0,\n"
+                "    scale=1.0/math.sqrt(head_dim)\n"
+                ")"
+            )
+        elif fusion_type == "matmul_allreduce":
+            code_examples["pytorch"] = (
+                "output = torch_npu.npu_mm_all_reduce_base(\n"
+                "    input, weight, hcomm_info,\n"
+                "    reduce_op='sum', comm_turn=0\n"
+                ")"
+            )
+        elif fusion_type == "fused_optimizer":
+            fused_name = opp.get("fused_replacement", "NpuFusedAdamW")
+            code_examples["pytorch"] = (
+                f"optimizer = torch_npu.optim.{fused_name}(model.parameters(), lr=1e-4)"
+            )
+
+        suggestions.append({
+            "id": opp.get("suggestion_id", "FUSION-01"),
+            "title": f"Operator fusion opportunity: {fusion_type} ({share:.1f}% of compute)",
+            "priority": priority,
+            "category": "fusion",
+            "expected_benefit": opp.get("estimated_speedup", "5-15%"),
+            "trigger_metric": f"fusion_type={fusion_type}, combined_share={share:.1f}%",
+            "actions": [
+                f"Replace with {opp.get('replacement_api', 'fused variant')}",
+                f"Constraint: {opp.get('constraint', 'check compatibility')}",
+            ],
+            "code_examples": code_examples if code_examples else None,
+            "validation_metrics": ["operator_time_share", "step_time_ms"],
+        })
+
+    return suggestions
+
+
+def _degradation_rules(
+    degradation_json: Optional[dict],
+) -> list[dict]:
+    """Generate cluster degradation-specific suggestions."""
+    suggestions = []
+
+    if not degradation_json or not degradation_json.get("degradation_classification_available"):
+        return suggestions
+
+    primary_type = degradation_json.get("primary_type")
+    sub = degradation_json.get("sub_classification", {})
+    confidence = sub.get("confidence", 0.5)
+    actions = degradation_json.get("recommended_actions", [])
+
+    if not primary_type:
+        return suggestions
+
+    priority = "high" if confidence >= 0.75 else "medium"
+
+    degradation_titles = {
+        "scale_up": "Scale-up degradation detected: model sharding strategy likely suboptimal",
+        "hardware_change": "Hardware change degradation: component-level regression detected",
+        "long_term_training": "Long-term training degradation: possible memory leak or thermal throttling",
+        "performance_fluctuation": "Performance fluctuation: intermittent resource contention",
+        "slow_node": "Slow node detected: asymmetric performance across nodes",
+        "network_problem": "Network problem: all cards affected by communication issues",
+    }
+
+    suggestions.append({
+        "id": f"DEGRAD-{primary_type.replace('_', '-').upper()}",
+        "title": degradation_titles.get(primary_type, f"Cluster degradation: {primary_type}"),
+        "priority": priority,
+        "category": "cluster_degradation",
+        "expected_benefit": "10-30% cluster performance recovery",
+        "trigger_metric": f"degradation_type={primary_type}, confidence={confidence:.2f}",
+        "actions": actions[:4],
+        "validation_metrics": ["step_time_ms", "linearity", "comm_ratio"],
+    })
+
+    return suggestions
+
+
+def _affinity_rules(
+    affinity_json: Optional[dict],
+) -> list[dict]:
+    """Generate NPU affinity optimization suggestions."""
+    suggestions = []
+
+    if not affinity_json or not affinity_json.get("npu_affinity_analysis_available"):
+        return suggestions
+
+    steps = affinity_json.get("steps", [])
+    overall_score = affinity_json.get("overall_affinity_score", 1.0)
+
+    for step in steps:
+        step_name = step.get("name", "")
+        step_score = step.get("score", 1.0)
+        if step_score >= 0.8:
+            continue
+
+        step_suggestions = step.get("suggestions", [])
+        if not step_suggestions:
+            continue
+
+        first_sug = step_suggestions[0]
+        priority = "high" if step_score < 0.5 else "medium"
+
+        suggestions.append({
+            "id": first_sug.get("id", f"NPU-AFFINITY-{step_name or step.get('step', 0)}"),
+            "title": f"NPU affinity gap in {step_name} (score: {step_score:.2f})",
+            "priority": priority,
+            "category": "npu_affinity",
+            "expected_benefit": "10-30% step time reduction",
+            "trigger_metric": f"affinity_step={step_name}, score={step_score:.2f}",
+            "actions": [
+                f"Address {step_name} optimization: {first_sug.get('type', 'unknown')}",
+                first_sug.get("code_example", "See optimization-knowledge-base.md"),
+            ],
+            "validation_metrics": ["overall_affinity_score", "step_time_ms"],
+        })
+
+    return suggestions
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -398,6 +536,9 @@ def build_suggestions(
     mfu_json: Optional[dict],
     cluster_json: Optional[dict],
     jitter_json: Optional[dict],
+    fusion_json: Optional[dict] = None,
+    degradation_json: Optional[dict] = None,
+    affinity_json: Optional[dict] = None,
 ) -> list[dict]:
     """Build all optimization suggestions."""
     primary = bottlenecks.get("primary_candidate", {})
@@ -410,6 +551,9 @@ def build_suggestions(
     all_suggestions.extend(_host_rules(trace_gaps_json, step_json, primary))
     all_suggestions.extend(_cluster_rules(cluster_json, primary))
     all_suggestions.extend(_jitter_rules(jitter_json))
+    all_suggestions.extend(_fusion_rules(fusion_json))
+    all_suggestions.extend(_degradation_rules(degradation_json))
+    all_suggestions.extend(_affinity_rules(affinity_json))
 
     # Sort by priority
     priority_order = {"high": 0, "medium": 1, "low": 2}
@@ -431,6 +575,9 @@ def main() -> int:
     parser.add_argument("--mfu-json", help="MFU calculation JSON")
     parser.add_argument("--cluster-json", help="Cluster analysis JSON")
     parser.add_argument("--jitter-json", help="Jitter analysis JSON")
+    parser.add_argument("--fusion-json", help="Operator fusion analysis JSON")
+    parser.add_argument("--degradation-json", help="Cluster degradation classification JSON")
+    parser.add_argument("--affinity-json", help="NPU affinity analysis JSON")
     parser.add_argument("--output-json", required=True, help="Output JSON path")
     args = parser.parse_args()
 
@@ -446,11 +593,14 @@ def main() -> int:
     mfu = load_optional_json(args.mfu_json)
     cluster = load_optional_json(args.cluster_json)
     jitter = load_optional_json(args.jitter_json)
+    fusion = load_optional_json(args.fusion_json)
+    degradation = load_optional_json(args.degradation_json)
+    affinity = load_optional_json(args.affinity_json)
 
     suggestions = build_suggestions(
         profile, bottlenecks,
         step, comm, memory, input_data, trace_gaps, hotspot,
-        mfu, cluster, jitter,
+        mfu, cluster, jitter, fusion, degradation, affinity,
     )
 
     high_count = sum(1 for s in suggestions if s.get("priority") == "high")

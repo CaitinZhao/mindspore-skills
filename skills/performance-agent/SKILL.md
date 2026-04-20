@@ -104,12 +104,21 @@ If running in `fix` mode, continue with:
 17. scripts/analyze_jitter.py             (from step summary)
 18. scripts/calculate_mfu.py              (from step + model_config + hardware)
 19. scripts/recommend_parallel_strategy.py (when model config available)
-20. scripts/build_performance_profile.py
-21. scripts/classify_bottlenecks.py
-22. scripts/build_optimization_suggestions.py
-23. scripts/compare_validation_metrics.py (when before/after metrics exist)
-24. scripts/build_performance_report.py
+20. scripts/correlate_host_device.py      (when trace_view.json exists)
+21. scripts/analyze_operator_fusion.py    (when hotspot data exists)
+22. scripts/classify_cluster_degradation.py (when cluster data exists)
+23. scripts/analyze_npu_affinity.py       (from hotspot + comm + step data)
+24. scripts/build_performance_profile.py
+25. scripts/classify_bottlenecks.py
+26. scripts/infer_root_cause.py           (from bottlenecks + profile)
+27. scripts/build_optimization_suggestions.py
+28. scripts/compare_validation_metrics.py (when before/after metrics exist)
+29. scripts/compare_profiling_runs.py     (when baseline/comparison dirs exist)
+30. scripts/build_performance_report.py
 ```
+
+The entire pipeline can also be run concurrently with wave-based
+parallelism using `scripts/run_parallel_analysis.py`.
 
 Do not skip directly to free-form diagnosis when these helpers can recover the
 required evidence deterministically.
@@ -205,11 +214,30 @@ Use:
 - `scripts/analyze_jitter.py` to detect step-time variance
 - `scripts/analyze_communication_matrix.py` to detect slow communication links
 - `scripts/calculate_linearity.py` to measure scaling efficiency
+- `scripts/classify_cluster_degradation.py` to classify degradation type
 
 Load:
 
 - `references/cluster-rank-diagnosis.md` for slow-card expert rules
 - `references/jitter-detection.md` for jitter thresholds
+
+## Stage 1.6. Correlation & Fusion Analyzer (Conditional)
+
+When trace and hotspot data are available, perform deeper analysis:
+
+Use:
+
+- `scripts/correlate_host_device.py` to link host events to device kernels
+- `scripts/analyze_operator_fusion.py` to detect fusion opportunities
+- `scripts/analyze_npu_affinity.py` to run the four-step affinity analysis
+
+Rules:
+
+- If sync points detected (tensor.item, reduce_all, isfinite), add
+  unnecessary_sync to the bottleneck candidates
+- If fusion opportunities exceed 20% combined share, prioritize fusion
+  suggestions
+- Use affinity score to guide NPU-specific optimization recommendations
 
 ## Stage 2. Bottleneck Validator
 
@@ -229,6 +257,9 @@ At minimum, validate across these groups when relevant:
 - performance jitter
 - AIC microarchitecture bottleneck
 - host-bound vs device-bound (use `scripts/detect_bound_type.py`)
+- operator fusion opportunity (use `scripts/analyze_operator_fusion.py`)
+- cluster degradation pattern (use `scripts/classify_cluster_degradation.py`)
+- NPU affinity gap (use `scripts/analyze_npu_affinity.py`)
 
 When useful, read existing profiler artifacts, trace exports, hotspot
 summaries, and earlier readiness snapshots such as `env.lock.json`. If
@@ -431,6 +462,11 @@ Use these helper scripts when useful:
 - `scripts/calculate_linearity.py` — Cluster scaling efficiency (threshold <0.8)
 - `scripts/detect_bound_type.py` — Host-Bound vs Device-Bound from timeline data
 - `scripts/recommend_parallel_strategy.py` — TP/PP/DP/ZeRO/Recompute strategy with memory sizing
+- `scripts/correlate_host_device.py` — Host-Device call stack correlation, sync point detection
+- `scripts/analyze_operator_fusion.py` — Fusion opportunity detection (FlashAttention, MatmulAllReduce, fused optimizers)
+- `scripts/classify_cluster_degradation.py` — Cluster degradation classification (scale-up, hardware, long-term, network)
+- `scripts/analyze_npu_affinity.py` — Four-step NPU affinity optimization analysis
+- `scripts/infer_root_cause.py` — Root cause inference engine with causal chain reasoning
 
 ### Classification & Suggestions
 - `scripts/build_hotspot_brief.py`
@@ -440,7 +476,11 @@ Use these helper scripts when useful:
 
 ### Validation & Reporting
 - `scripts/compare_validation_metrics.py`
+- `scripts/compare_profiling_runs.py` — Full profiling comparison across multiple dimensions
 - `scripts/build_performance_report.py`
+
+### Pipeline Orchestration
+- `scripts/run_parallel_analysis.py` — Async wave-based pipeline orchestrator
 
 ## Execution Notes
 

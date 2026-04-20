@@ -275,10 +275,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Recommend parallel strategy based on model and hardware configuration"
     )
-    parser.add_argument("--num-layers", type=int, required=True, help="number of transformer layers")
-    parser.add_argument("--hidden-size", type=int, required=True, help="hidden dimension size")
-    parser.add_argument("--seq-len", type=int, required=True, help="sequence length")
-    parser.add_argument("--batch-size", type=int, required=True, help="per-device batch size")
+    parser.add_argument("--num-layers", type=int, default=None, help="number of transformer layers")
+    parser.add_argument("--hidden-size", type=int, default=None, help="hidden dimension size")
+    parser.add_argument("--seq-len", type=int, default=None, help="sequence length")
+    parser.add_argument("--batch-size", type=int, default=None, help="per-device batch size")
+    parser.add_argument("--model-config", help="model config JSON providing num_layers/hidden_size/seq_len/batch_size")
     parser.add_argument("--vocab-size", type=int, default=32000, help="vocabulary size")
     parser.add_argument("--num-nodes", type=int, default=1, help="number of nodes")
     parser.add_argument("--npus-per-node", type=int, default=8, help="NPUs per node")
@@ -290,6 +291,34 @@ def main() -> int:
     parser.add_argument("--ffn-type", default="standard", choices=["standard", "swiglu"], help="FFN type: standard or swiglu")
     parser.add_argument("--output-json", required=True, help="output JSON path")
     args = parser.parse_args()
+
+    # Load model config if provided, filling in missing CLI args
+    if args.model_config:
+        try:
+            mc = json.loads(Path(args.model_config).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            parser.error(f"Cannot read --model-config: {exc}")
+        if args.num_layers is None:
+            args.num_layers = mc.get("num_layers") or mc.get("num-layer") or mc.get("n_layer")
+        if args.hidden_size is None:
+            args.hidden_size = mc.get("hidden_size") or mc.get("hidden-size") or mc.get("n_embd")
+        if args.seq_len is None:
+            args.seq_len = mc.get("seq_len") or mc.get("seq-length") or mc.get("seq_length")
+        if args.batch_size is None:
+            args.batch_size = mc.get("batch_size") or mc.get("batch-size")
+
+    # Validate required params
+    missing = []
+    if not args.num_layers:
+        missing.append("--num-layers")
+    if not args.hidden_size:
+        missing.append("--hidden-size")
+    if not args.seq_len:
+        missing.append("--seq-len")
+    if not args.batch_size:
+        missing.append("--batch-size")
+    if missing:
+        parser.error(f"Missing required arguments: {', '.join(missing)} (or provide --model-config)")
 
     # Resolve hardware
     hardware = args.hardware

@@ -5,6 +5,8 @@ import re
 from pathlib import Path
 from typing import Optional
 
+from perf_common import write_json
+
 
 SCRIPT_HINTS = ("train", "main", "run", "infer", "launch")
 SCRIPT_SUFFIXES = {".py", ".sh"}
@@ -197,11 +199,16 @@ def main() -> int:
     parser.add_argument("--root", dest="root_flag", help="workspace root to scan")
     parser.add_argument("--working-dir", dest="working_dir_flag", help="alias of --root")
     parser.add_argument("--limit", type=int, default=200, help="maximum recent files to inspect")
+    parser.add_argument("--output-json", help="output JSON path (prints to stdout if omitted)")
     args = parser.parse_args()
 
     root_arg = args.root_flag or args.working_dir_flag or args.root_path or "."
     report = summarize(Path(root_arg).resolve(), args.limit)
-    print(json.dumps(report, indent=2, ensure_ascii=False))
+
+    if args.output_json:
+        write_json(Path(args.output_json), report)
+    else:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
     return 0
 
 
