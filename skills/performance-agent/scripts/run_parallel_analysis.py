@@ -43,6 +43,13 @@ WAVE_DEFS = [
     {
         "wave": 3,
         "scripts": [
+            {"name": "analyze_collective_types.py", "required_args": ["--trace-root"]},
+            {"name": "analyze_rank_variance.py", "required_args": ["--trace-root"]},
+        ],
+    },
+    {
+        "wave": 4,
+        "scripts": [
             {"name": "detect_slow_ranks.py", "required_args": ["--trace-root"]},
             {"name": "calculate_linearity.py", "required_args": ["--trace-root"]},
             {"name": "analyze_jitter.py", "required_args": ["--step-json"]},
@@ -51,7 +58,14 @@ WAVE_DEFS = [
         ],
     },
     {
-        "wave": 4,
+        "wave": 5,
+        "scripts": [
+            {"name": "correlate_slow_rank_ops.py", "required_args": ["--trace-root"]},
+            {"name": "attribute_wait_times.py", "required_args": []},
+        ],
+    },
+    {
+        "wave": 6,
         "scripts": [
             {"name": "correlate_host_device.py", "required_args": []},
             {"name": "analyze_operator_fusion.py", "required_args": []},
@@ -59,27 +73,28 @@ WAVE_DEFS = [
         ],
     },
     {
-        "wave": 5,
+        "wave": 7,
         "scripts": [
             {"name": "analyze_npu_affinity.py", "required_args": []},
             {"name": "build_performance_profile.py", "required_args": ["--working-dir"]},
         ],
     },
     {
-        "wave": 6,
+        "wave": 8,
         "scripts": [
             {"name": "classify_bottlenecks.py", "required_args": ["--profile-json"]},
         ],
     },
     {
-        "wave": 7,
+        "wave": 9,
         "scripts": [
+            {"name": "build_causal_chain.py", "required_args": ["--bottlenecks-json"]},
             {"name": "build_optimization_suggestions.py", "required_args": ["--profile-json", "--bottlenecks-json"]},
             {"name": "infer_root_cause.py", "required_args": ["--bottlenecks-json"]},
         ],
     },
     {
-        "wave": 8,
+        "wave": 10,
         "scripts": [
             {"name": "compare_validation_metrics.py", "required_args": ["--before-json", "--after-json"]},
         ],
@@ -87,9 +102,49 @@ WAVE_DEFS = [
 ]
 
 
+_SCRIPT_ARTIFACT_NAMES: dict[str, str] = {
+    "validate_profiler_data.py": "validation",
+    "find_run_context.py": "context",
+    "locate_profiler_output.py": "profiler_location",
+    "summarize_step_breakdown.py": "step",
+    "summarize_communication.py": "communication",
+    "summarize_memory_pressure.py": "memory",
+    "summarize_input_pipeline.py": "input",
+    "summarize_trace_gaps.py": "trace_gaps",
+    "summarize_msprof_hotspots.py": "hotspot",
+    "summarize_aic_metrics.py": "aic_metrics",
+    "detect_slow_ranks.py": "slow_ranks",
+    "detect_bound_type.py": "bound_type",
+    "calculate_linearity.py": "linearity",
+    "calculate_mfu.py": "mfu",
+    "analyze_jitter.py": "jitter",
+    "recommend_parallel_strategy.py": "parallel_strategy",
+    "correlate_host_device.py": "host_device",
+    "analyze_operator_fusion.py": "fusion",
+    "classify_cluster_degradation.py": "degradation",
+    "analyze_npu_affinity.py": "affinity",
+    "build_performance_profile.py": "profile",
+    "classify_bottlenecks.py": "bottlenecks",
+    "infer_root_cause.py": "root_cause",
+    "build_optimization_suggestions.py": "suggestions",
+    "compare_validation_metrics.py": "comparison",
+    "compare_profiling_runs.py": "profiling_comparison",
+    "build_performance_report.py": "report",
+    "build_hotspot_brief.py": "hotspot_brief",
+    "analyze_collective_types.py": "collective_types",
+    "analyze_rank_variance.py": "rank_variance",
+    "correlate_slow_rank_ops.py": "slow_rank_ops",
+    "attribute_wait_times.py": "wait_times",
+    "build_causal_chain.py": "causal_chain",
+}
+
+
 def _output_name(script_name: str) -> str:
-    """Derive an artifact key from the script filename."""
-    return script_name.replace(".py", "").replace("summarize_", "").replace("build_", "").replace("calculate_", "").replace("analyze_", "").replace("detect_", "").replace("classify_", "").replace("compare_", "").replace("recommend_", "").replace("locate_", "").replace("find_", "").replace("validate_", "").replace("infer_", "")
+    """Derive an artifact key from the script filename.
+
+    Uses an explicit mapping to avoid fragile prefix-stripping heuristics.
+    """
+    return _SCRIPT_ARTIFACT_NAMES.get(script_name, script_name.replace(".py", ""))
 
 
 def _build_args_for_script(
@@ -277,20 +332,57 @@ def _build_args_for_script(
             ("mfu", "--mfu-json"),
         ])
 
-    # classify_bottlenecks: also pass fusion/degradation/affinity from wave 4
+    # correlate_slow_rank_ops: needs rank_variance and cluster
+    if name == "correlate_slow_rank_ops.py":
+        _feed_artifacts([
+            ("rank_variance", "--rank-variance-json"),
+            ("slow_ranks", "--cluster-json"),
+        ])
+
+    # attribute_wait_times: needs collective_types, rank_variance, cluster, step, comm
+    if name == "attribute_wait_times.py":
+        _feed_artifacts([
+            ("collective_types", "--collective-types-json"),
+            ("rank_variance", "--rank-variance-json"),
+            ("slow_ranks", "--cluster-json"),
+            ("step_breakdown", "--step-json"),
+            ("communication", "--communication-json"),
+        ])
+
+    # build_causal_chain: needs bottlenecks + all deep analysis artifacts
+    if name == "build_causal_chain.py":
+        _feed_artifacts([
+            ("performance_profile", "--profile-json"),
+            ("collective_types", "--collective-types-json"),
+            ("rank_variance", "--rank-variance-json"),
+            ("slow_rank_ops", "--slow-rank-ops-json"),
+            ("wait_times", "--wait-attribution-json"),
+            ("step_breakdown", "--step-json"),
+            ("communication", "--communication-json"),
+            ("jitter", "--jitter-json"),
+            ("slow_ranks", "--cluster-json"),
+            ("mfu", "--mfu-json"),
+        ])
+
+    # classify_bottlenecks: also pass fusion/degradation/affinity from wave 6
     if name == "classify_bottlenecks.py":
         _feed_artifacts([
             ("operator_fusion", "--fusion-json"),
             ("cluster_degradation", "--degradation-json"),
             ("npu_affinity", "--affinity-json"),
+            ("collective_types", "--collective-types-json"),
+            ("rank_variance", "--rank-variance-json"),
         ])
 
-    # build_optimization_suggestions: also pass fusion/degradation/affinity
+    # build_optimization_suggestions: also pass fusion/degradation/affinity + deep analysis
     if name == "build_optimization_suggestions.py":
         _feed_artifacts([
             ("operator_fusion", "--fusion-json"),
             ("cluster_degradation", "--degradation-json"),
             ("npu_affinity", "--affinity-json"),
+            ("collective_types", "--collective-types-json"),
+            ("rank_variance", "--rank-variance-json"),
+            ("wait_times", "--wait-attribution-json"),
         ])
 
     return args

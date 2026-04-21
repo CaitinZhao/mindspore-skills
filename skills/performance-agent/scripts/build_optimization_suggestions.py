@@ -520,6 +520,155 @@ def _affinity_rules(
     return suggestions
 
 
+def _syncbn_rules(
+    collective_types_json: Optional[dict],
+    rank_variance_json: Optional[dict],
+    wait_attribution_json: Optional[dict],
+) -> list[dict]:
+    """Generate SyncBN-specific optimization suggestions."""
+    suggestions = []
+
+    if not collective_types_json or not collective_types_json.get("collective_type_analysis_available"):
+        return suggestions
+
+    syncbn_share = collective_types_json.get("syncbn_share_percent", 0)
+    syncbn_dominant = collective_types_json.get("syncbn_dominant", False)
+
+    if syncbn_share < 10:
+        return suggestions
+
+    # Estimate wait impact
+    wait_ms = 0.0
+    if wait_attribution_json and wait_attribution_json.get("wait_time_attribution_available"):
+        for attr in wait_attribution_json.get("attributions", []):
+            if attr.get("collective_type") == "SyncBN":
+                wait_ms = attr.get("estimated_wait_ms", 0)
+                break
+
+    priority = "high" if syncbn_dominant else "medium"
+
+    evidence = [f"SyncBN collective time share: {syncbn_share:.1f}%"]
+    if rank_variance_json and rank_variance_json.get("jittery_ranks"):
+        jittery = rank_variance_json["jittery_ranks"]
+        rank_str = ", ".join(str(r) for r in jittery[:3])
+        evidence.append(f"Jittery ranks [{rank_str}] amplify SyncBN barrier wait")
+    if wait_ms > 0:
+        evidence.append(f"Estimated SyncBN wait: {wait_ms:.1f}ms/step")
+
+    suggestions.append({
+        "id": "SYNCBN-01",
+        "title": "Replace SyncBN with GroupNorm or FrozenBN",
+        "priority": priority,
+        "category": "communication",
+        "evidence": evidence,
+        "action": (
+            "SyncBN requires cross-rank synchronization at every training step, "
+            "creating a barrier that amplifies any rank compute jitter. "
+            "Replace with GroupNorm (groups=32) or FrozenBN to eliminate synchronization."
+        ),
+        "config": (
+            "# Replace SyncBatchNorm with GroupNorm\n"
+            "import torch.nn as nn\n"
+            "nn.SyncBatchNorm -> nn.GroupNorm(num_groups=32, num_channels=C)\n\n"
+            "# Or use FrozenBN (freeze BN statistics after initial training)\n"
+            "model.apply(lambda m: setattr(m, 'track_running_stats', False) "
+            "if isinstance(m, nn.BatchNorm2d) else None)"
+        ),
+    })
+
+    if syncbn_share > 25:
+        suggestions.append({
+            "id": "SYNCBN-02",
+            "title": "Reduce SyncBN synchronization frequency",
+            "priority": "medium",
+            "category": "communication",
+            "evidence": evidence,
+            "action": (
+                "If SyncBN cannot be replaced, reduce synchronization frequency: "
+                "sync every N steps instead of every step, or use delayed synchronization."
+            ),
+            "config": (
+                "# Sync every N steps instead of every step\n"
+                "sync_every_n_steps = 10  # adjust based on training stability"
+            ),
+        })
+
+    return suggestions
+
+
+def _rank_jitter_rules(
+    rank_variance_json: Optional[dict],
+    wait_attribution_json: Optional[dict],
+) -> list[dict]:
+    """Generate rank jitter optimization suggestions."""
+    suggestions = []
+
+    if not rank_variance_json or not rank_variance_json.get("rank_variance_analysis_available"):
+        return suggestions
+
+    jittery_ranks = rank_variance_json.get("jittery_ranks", [])
+    if not jittery_ranks:
+        return suggestions
+
+    worst_rank = rank_variance_json.get("worst_jittery_rank")
+    worst_cv = rank_variance_json.get("worst_rank_cv", 0)
+    drag = rank_variance_json.get("drag_effect_ms", 0)
+
+    priority = "high" if worst_cv > 0.20 else "medium"
+
+    evidence = [
+        f"Jittery ranks: {jittery_ranks}",
+        f"Rank {worst_rank} CV: {worst_cv:.3f}",
+    ]
+    if drag > 0:
+        evidence.append(f"Drag effect: {drag:.1f}ms per step")
+
+    suggestions.append({
+        "id": "JITTER-01",
+        "title": f"Stabilize compute on jittery Rank {worst_rank}",
+        "priority": priority,
+        "category": "jitter",
+        "evidence": evidence,
+        "action": (
+            f"Rank {worst_rank} has high compute variance (CV={worst_cv:.3f}), "
+            "which creates barrier wait for all other ranks. "
+            "Investigate: dynamic shapes, GC pauses, CPU scheduling, or hardware issues."
+        ),
+        "config": (
+            "# Enable CPU affinity to prevent OS scheduling variance\n"
+            "numactl --cpunodebind=0 --membind=0 python train.py\n\n"
+            "# Reduce GC pressure in training loop\n"
+            "import gc\n"
+            "gc.disable()  # in training loop\n"
+            "# ... training step ...\n"
+            "gc.enable()\n\n"
+            "# Pad sequences to fixed sizes to eliminate recompilation"
+        ),
+    })
+
+    if wait_attribution_json and wait_attribution_json.get("wait_time_attribution_available"):
+        primary_source = wait_attribution_json.get("primary_wait_source")
+        savings = wait_attribution_json.get("elimination_savings_ms", 0)
+        if primary_source and savings > 0:
+            suggestions.append({
+                "id": "JITTER-02",
+                "title": f"Eliminate {primary_source} barrier wait caused by rank jitter",
+                "priority": "medium",
+                "category": "jitter",
+                "evidence": [
+                    f"Primary wait source: {primary_source}",
+                    f"Estimated savings: {savings:.1f}ms/step",
+                ],
+                "action": (
+                    f"Rank jitter causes {primary_source} barrier waits totaling "
+                    f"{savings:.1f}ms per step. Fixing the jitter source will eliminate this wait."
+                ),
+                "config": "",
+            })
+
+    return suggestions
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -539,6 +688,9 @@ def build_suggestions(
     fusion_json: Optional[dict] = None,
     degradation_json: Optional[dict] = None,
     affinity_json: Optional[dict] = None,
+    collective_types_json: Optional[dict] = None,
+    rank_variance_json: Optional[dict] = None,
+    wait_attribution_json: Optional[dict] = None,
 ) -> list[dict]:
     """Build all optimization suggestions."""
     primary = bottlenecks.get("primary_candidate", {})
@@ -554,6 +706,8 @@ def build_suggestions(
     all_suggestions.extend(_fusion_rules(fusion_json))
     all_suggestions.extend(_degradation_rules(degradation_json))
     all_suggestions.extend(_affinity_rules(affinity_json))
+    all_suggestions.extend(_syncbn_rules(collective_types_json, rank_variance_json, wait_attribution_json))
+    all_suggestions.extend(_rank_jitter_rules(rank_variance_json, wait_attribution_json))
 
     # Sort by priority
     priority_order = {"high": 0, "medium": 1, "low": 2}
@@ -578,11 +732,22 @@ def main() -> int:
     parser.add_argument("--fusion-json", help="Operator fusion analysis JSON")
     parser.add_argument("--degradation-json", help="Cluster degradation classification JSON")
     parser.add_argument("--affinity-json", help="NPU affinity analysis JSON")
+    parser.add_argument("--collective-types-json", help="Collective type analysis JSON")
+    parser.add_argument("--rank-variance-json", help="Rank variance analysis JSON")
+    parser.add_argument("--wait-attribution-json", help="Wait time attribution JSON")
     parser.add_argument("--output-json", required=True, help="Output JSON path")
     args = parser.parse_args()
 
-    profile = json.loads(Path(args.profile_json).read_text(encoding="utf-8"))
-    bottlenecks = json.loads(Path(args.bottlenecks_json).read_text(encoding="utf-8"))
+    try:
+        profile = json.loads(Path(args.profile_json).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"Error reading profile JSON: {e}", file=__import__("sys").stderr)
+        return 1
+    try:
+        bottlenecks = json.loads(Path(args.bottlenecks_json).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"Error reading bottlenecks JSON: {e}", file=__import__("sys").stderr)
+        return 1
 
     step = load_optional_json(args.step_json)
     comm = load_optional_json(args.communication_json)
@@ -596,11 +761,15 @@ def main() -> int:
     fusion = load_optional_json(args.fusion_json)
     degradation = load_optional_json(args.degradation_json)
     affinity = load_optional_json(args.affinity_json)
+    collective_types = load_optional_json(args.collective_types_json)
+    rank_variance = load_optional_json(args.rank_variance_json)
+    wait_attribution = load_optional_json(args.wait_attribution_json)
 
     suggestions = build_suggestions(
         profile, bottlenecks,
         step, comm, memory, input_data, trace_gaps, hotspot,
         mfu, cluster, jitter, fusion, degradation, affinity,
+        collective_types, rank_variance, wait_attribution,
     )
 
     high_count = sum(1 for s in suggestions if s.get("priority") == "high")

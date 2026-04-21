@@ -136,3 +136,32 @@ def test_missing_input_exits_with_error(tmp_path: Path):
         text=True, capture_output=True,
     )
     assert result.returncode != 0
+
+
+def test_build_brief_with_pta_realistic_ops(tmp_path: Path):
+    """Build brief from PTA hotspot summary with realistic aclnn* operator names."""
+    ops = [
+        {"operator": "aclnnMatmul_MatMulCommon_MatMulV2", "share_percent": 32.5, "category": "computation_or_other"},
+        {"operator": "aclnnFlashAttentionScoreGrad_GetFlashAttentionSrc", "share_percent": 18.2, "category": "computation_or_other"},
+        {"operator": "aclnnFlashAttentionScore_GetFlashAttentionSrc", "share_percent": 15.8, "category": "computation_or_other"},
+        {"operator": "aclnnMul_MulAiCore_Mul", "share_percent": 8.4, "category": "computation_or_other"},
+        {"operator": "aclnnSilu_SiluAiCore_Silu", "share_percent": 5.1, "category": "computation_or_other"},
+    ]
+    summary_path = _write_hotspot_summary(tmp_path, ops)
+    output_json = tmp_path / "brief.json"
+    output_md = tmp_path / "brief.md"
+
+    run_script(
+        "build_hotspot_brief.py",
+        "--input-json", str(summary_path),
+        "--output-json", str(output_json),
+        "--output-md", str(output_md),
+    )
+
+    result = json.loads(output_json.read_text(encoding="utf-8"))
+    assert result["primary_focus"] == "aclnnMatmul_MatMulCommon_MatMulV2"
+    assert len(result["priority_queue"]) == 3  # default top_k=3
+    assert result["priority_queue"][0]["share_percent"] == 32.5
+
+    md_content = output_md.read_text(encoding="utf-8")
+    assert "aclnnMatmul" in md_content

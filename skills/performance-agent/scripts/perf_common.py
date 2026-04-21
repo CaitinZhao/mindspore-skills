@@ -2,6 +2,8 @@
 import csv
 import json
 import re
+import shutil
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -467,3 +469,17 @@ def avg_step_time_from_csv(step_csv: Path) -> Optional[float]:
                         continue
                     break
     return total / count if count > 0 else None
+
+
+def check_msprof_available() -> None:
+    """Ensure msprof is in PATH; required by CANN profiler analyse.
+
+    Exits with code 1 if msprof is not found.
+    """
+    if shutil.which("msprof") is None:
+        print(
+            "Error: msprof command not found. Please source the correct CANN environment, e.g.:\n"
+            "  source /usr/local/Ascend/ascend-toolkit/set_env.sh",
+            file=sys.stderr,
+        )
+        sys.exit(1)

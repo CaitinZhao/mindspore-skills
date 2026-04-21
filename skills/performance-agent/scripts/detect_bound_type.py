@@ -29,6 +29,9 @@ _FREE_TIME_THRESHOLD = 0.10
 # If free time >20%, it's strongly host-bound
 _STRONG_HOST_BOUND = 0.20
 
+# Maximum trace_view.json size to load (500 MB)
+_MAX_TRACE_SIZE_BYTES = 500 * 1024 * 1024
+
 
 def analyze_step_trace_bound(step_rows: list[dict]) -> dict:
     """Analyze bound type from step_trace_time.csv data.
@@ -248,9 +251,18 @@ def main() -> int:
     analysis: dict = {"bound_type": "unknown", "evidence": "No data"}
 
     if trace_json_path and trace_json_path.exists():
-        trace_data = read_json(trace_json_path)
-        analysis = analyze_trace_view_bound(trace_data)
-        analysis["source"] = f"trace_view: {trace_json_path}"
+        file_size = trace_json_path.stat().st_size
+        if file_size > _MAX_TRACE_SIZE_BYTES:
+            print(
+                f"Warning: trace_view.json is {file_size / (1024**3):.1f} GB, "
+                f"exceeds {_MAX_TRACE_SIZE_BYTES / (1024**2):.0f} MB limit. "
+                f"Skipping trace view analysis.",
+                file=sys.stderr,
+            )
+        else:
+            trace_data = read_json(trace_json_path)
+            analysis = analyze_trace_view_bound(trace_data)
+            analysis["source"] = f"trace_view: {trace_json_path}"
 
     # Step CSV provides complementary analysis (free time ratio)
     if step_csv_path and step_csv_path.exists():

@@ -7,6 +7,8 @@ from pathlib import Path
 from perf_common import normalize_key, parse_number, read_json, stage_to_domain, write_json
 
 
+_MAX_TRACE_SIZE_BYTES = 500 * 1024 * 1024
+
 CATEGORY_RULES = [
     ("graph_compile", ("compile", "graph_build", "recompile", "build_graph")),
     ("input_pipeline", ("dataset", "minddata", "dataloader", "getnext", "input")),
@@ -123,6 +125,15 @@ def main() -> int:
         raise SystemExit(1)
 
     trace_path = Path(args.trace_json).resolve() if args.trace_json else default_trace_view_path(Path(args.trace_root).resolve())
+    file_size = trace_path.stat().st_size
+    if file_size > _MAX_TRACE_SIZE_BYTES:
+        print(
+            f"Error: trace_view.json is {file_size / (1024**3):.1f} GB, "
+            f"exceeds {_MAX_TRACE_SIZE_BYTES / (1024**2):.0f} MB limit. "
+            f"Use a smaller trace or extract key events first.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
     events = iter_events(read_json(trace_path))
     summary = {
         "source_file": str(trace_path),

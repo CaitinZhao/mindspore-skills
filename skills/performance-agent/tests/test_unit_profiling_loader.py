@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from perf_test_utils import write_sample_profiler_export, run_script, ROOT, SCRIPTS
+from perf_test_utils import write_sample_profiler_export, write_sample_pta_profiler_export, run_script, ROOT, SCRIPTS
 
 
 def _write_torch_npu_profiler(root: Path) -> Path:
@@ -161,3 +161,37 @@ def test_nonexistent_path_exits_with_error(tmp_path: Path):
         text=True, capture_output=True,
     )
     assert result.returncode != 0
+
+
+# ---------------------------------------------------------------------------
+# PTA realistic data tests (based on real pro_data)
+# ---------------------------------------------------------------------------
+
+
+def test_detect_pta_single_rank_from_directory_name(tmp_path: Path):
+    """PTA profiler with *_ascend_pt name → torch_npu format."""
+    profiler_root = write_sample_pta_profiler_export(tmp_path)
+    result = run_script("profiling_loader.py", str(profiler_root))
+    data = json.loads(result.stdout)
+    assert data["format"] == "torch_npu"
+    assert data["num_ranks"] == 1
+    assert data["rank_ids"] == [0]
+
+
+def test_pta_inventory_kernel_details_available(tmp_path: Path):
+    """PTA profiler should discover kernel_details.csv."""
+    profiler_root = write_sample_pta_profiler_export(tmp_path)
+    result = run_script("profiling_loader.py", str(profiler_root))
+    data = json.loads(result.stdout)
+    assert data["available_data"]["trace_view"] is True
+    assert data["available_data"]["profiler_info"] is True
+
+
+def test_pta_inventory_reports_missing_step_trace(tmp_path: Path):
+    """PTA profiler without step_trace_time.csv should report missing."""
+    profiler_root = write_sample_pta_profiler_export(tmp_path)
+    result = run_script("profiling_loader.py", str(profiler_root))
+    data = json.loads(result.stdout)
+    assert data["available_data"]["step_trace"] is False
+    assert data["available_data"]["communication"] is False
+    assert data["available_data"]["memory_record"] is False

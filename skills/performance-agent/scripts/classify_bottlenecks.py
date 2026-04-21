@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+"""Classify performance bottlenecks from multi-dimensional analysis artifacts.
+
+Produces ranked bottleneck candidates with confidence scores and evidence.
+"""
 import argparse
 import json
 from pathlib import Path
@@ -58,6 +62,8 @@ def classify(
     fusion: Optional[dict] = None,
     degradation: Optional[dict] = None,
     affinity: Optional[dict] = None,
+    collective_types: Optional[dict] = None,
+    rank_variance: Optional[dict] = None,
 ) -> list[dict]:
     candidates_by_name: dict[str, dict] = {}
 
@@ -317,6 +323,51 @@ def classify(
                 ),
             )
 
+    # New: SyncBN synchronization bottleneck
+    if collective_types and collective_types.get("collective_type_analysis_available"):
+        syncbn_share = collective_types.get("syncbn_share_percent", 0)
+        syncbn_dominant = collective_types.get("syncbn_dominant", False)
+        if syncbn_share > 10:
+            evidence = [f"SyncBN share: {syncbn_share:.1f}%"]
+            if syncbn_dominant:
+                evidence.append("SyncBN is dominant collective type")
+            add_candidate(
+                candidates_by_name,
+                candidate(
+                    "syncbn_synchronization",
+                    0.78 if syncbn_dominant else 0.60,
+                    evidence,
+                    ["compare SyncBN time share after switching to GroupNorm"],
+                    [
+                        "Consider replacing SyncBN with GroupNorm or FrozenBN",
+                        "Reduce SyncBN synchronization frequency if possible",
+                        "Check if batch normalization can be computed locally",
+                    ],
+                ),
+            )
+
+    # New: Rank compute jitter
+    if rank_variance and rank_variance.get("rank_variance_analysis_available"):
+        jittery_ranks = rank_variance.get("jittery_ranks", [])
+        worst_cv = rank_variance.get("worst_rank_cv", 0)
+        drag = rank_variance.get("drag_effect_ms", 0)
+        if jittery_ranks and worst_cv > 0.10:
+            rank_str = ", ".join(str(r) for r in jittery_ranks[:3])
+            add_candidate(
+                candidates_by_name,
+                candidate(
+                    "rank_compute_jitter",
+                    0.75 if worst_cv > 0.20 else 0.60,
+                    [f"jittery ranks: [{rank_str}]", f"worst CV: {worst_cv:.3f}", f"drag effect: {drag:.1f}ms"],
+                    ["compare per-rank CV after stabilizing compute"],
+                    [
+                        "Investigate compute instability on jittery rank(s)",
+                        "Check for dynamic shapes, GC pauses, or CPU scheduling",
+                        "Enable CPU affinity (numactl/taskset)",
+                    ],
+                ),
+            )
+
     candidates = list(candidates_by_name.values())
 
     if not candidates:
@@ -349,10 +400,16 @@ def main() -> int:
     parser.add_argument("--fusion-json", help="operator fusion analysis JSON path")
     parser.add_argument("--degradation-json", help="cluster degradation classification JSON path")
     parser.add_argument("--affinity-json", help="NPU affinity analysis JSON path")
+    parser.add_argument("--collective-types-json", help="Collective type analysis JSON path")
+    parser.add_argument("--rank-variance-json", help="Rank variance analysis JSON path")
     parser.add_argument("--output-json", required=True, help="path to write the bottleneck classification JSON")
     args = parser.parse_args()
 
-    profile = json.loads(Path(args.profile_json).read_text(encoding="utf-8"))
+    try:
+        profile = json.loads(Path(args.profile_json).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"Error reading profile JSON: {e}", file=__import__("sys").stderr)
+        return 1
     step = load_optional_json(args.step_json)
     communication = load_optional_json(args.communication_json)
     memory = load_optional_json(args.memory_json)
@@ -365,8 +422,10 @@ def main() -> int:
     fusion = load_optional_json(args.fusion_json)
     degradation = load_optional_json(args.degradation_json)
     affinity = load_optional_json(args.affinity_json)
+    collective_types = load_optional_json(args.collective_types_json)
+    rank_variance = load_optional_json(args.rank_variance_json)
 
-    ranked = classify(profile, step, communication, memory, input_summary, trace_gaps, hotspot, mfu, cluster, jitter, fusion, degradation, affinity)
+    ranked = classify(profile, step, communication, memory, input_summary, trace_gaps, hotspot, mfu, cluster, jitter, fusion, degradation, affinity, collective_types, rank_variance)
     report = {
         "schema_version": "performance-agent/0.1",
         "skill": "performance-agent",

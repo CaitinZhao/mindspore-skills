@@ -82,7 +82,30 @@ If running in `fix` mode, continue with:
 9. `fix-application`
 10. `fix-verification`
 
-### Recommended Deterministic Helper Order
+### Fast Path: Automated One-Command Analysis
+
+For `_ascend_pt` format with SQLite database (most common torch_npu profiler output):
+
+```bash
+# First run: ~2 minutes for 28M-row DB (one-time scan)
+# Subsequent runs: instant (cached results)
+python scripts/run_analysis.py <profiler_data_dir>
+
+# Force re-analysis
+python scripts/run_analysis.py <profiler_data_dir> --force
+```
+
+This single command:
+- Auto-detects profiler format
+- Scans the SQLite DB in minimum passes (1 GROUP BY for all ops)
+- Produces all output artifacts under `<dir>/out/`
+- Caches results in `out/meta/_cache.json` for instant re-runs
+- Prints verdict, top bottleneck, and top suggestion
+
+**Always try `run_analysis.py` first.** Only fall back to the manual
+pipeline below when the automated path does not cover your format.
+
+### Recommended Deterministic Helper Order (Manual Fallback)
 
 ```
  1. scripts/validate_profiler_data.py

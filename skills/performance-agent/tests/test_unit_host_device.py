@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from perf_test_utils import run_script
+from perf_test_utils import run_script, write_sample_pta_profiler_export
 
 
 def test_correlation_with_trace_view(tmp_path: Path):
@@ -56,4 +56,18 @@ def test_correlation_empty_events(tmp_path: Path):
                "--output-json", str(output_json))
 
     result = json.loads(output_json.read_text(encoding="utf-8"))
+    assert result["host_device_correlation_available"] is False
+
+
+def test_correlation_with_pta_kernel_details(tmp_path: Path):
+    """Test correlation with realistic PTA kernel_details.csv (aclnn* kernels)."""
+    profiler_root = write_sample_pta_profiler_export(tmp_path)
+
+    output_json = tmp_path / "correlation.json"
+    run_script("correlate_host_device.py",
+               "--kernel-details-csv", str(profiler_root / "ASCEND_PROFILER_OUTPUT" / "kernel_details.csv"),
+               "--output-json", str(output_json))
+
+    result = json.loads(output_json.read_text(encoding="utf-8"))
+    # Without trace_view, correlation itself is unavailable
     assert result["host_device_correlation_available"] is False

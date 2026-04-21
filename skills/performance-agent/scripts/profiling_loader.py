@@ -88,6 +88,24 @@ class ProfilingLoader:
         """Detect profiler format from directory structure and files."""
         root = self._root
 
+        # Check directory name convention first: *_ascend_pt = torch_npu
+        dir_name = root.name.lower()
+        if dir_name.endswith("_ascend_pt") or "_ascend_pt_" in dir_name:
+            return ProfilerFormat.TORCH_NPU
+        if dir_name.endswith("_ascend_ms") or "_ascend_ms_" in dir_name:
+            return ProfilerFormat.MINDSPORE
+
+        # Check profiler_info.json for framework indicators
+        for info_file in sorted(root.glob("profiler_info*.json")):
+            try:
+                info = read_json(info_file)
+                if "torch_npu_version" in info:
+                    return ProfilerFormat.TORCH_NPU
+                if "mindspore_version" in info:
+                    return ProfilerFormat.MINDSPORE
+            except Exception:
+                continue
+
         # MindSpore: ASCEND_PROFILER_OUTPUT directory
         ascend_dir = root / "ASCEND_PROFILER_OUTPUT"
         if ascend_dir.exists():

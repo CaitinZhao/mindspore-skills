@@ -76,3 +76,36 @@ def test_comparison_missing_dir(tmp_path: Path):
 
     result = json.loads(output_json.read_text(encoding="utf-8"))
     assert result["comparison_available"] is False
+
+
+def test_comparison_pta_hotspot_change(tmp_path: Path):
+    """Test comparison of PTA hotspot changes between two runs."""
+    baseline = tmp_path / "baseline"
+    comparison = tmp_path / "comparison"
+    baseline.mkdir()
+    comparison.mkdir()
+
+    # Baseline: MatMul dominates
+    (baseline / "hotspot.json").write_text(json.dumps({
+        "top_operators": [
+            {"operator": "aclnnMatmul_MatMulCommon_MatMulV2", "total_time": 420.5, "share_percent": 35.0, "count": 100},
+            {"operator": "aclnnFlashAttentionScoreGrad_GetFlashAttentionSrc", "total_time": 310.4, "share_percent": 25.0, "count": 100},
+        ]
+    }), encoding="utf-8")
+
+    # Comparison: After optimization, FlashAttention dominates (regression)
+    (comparison / "hotspot.json").write_text(json.dumps({
+        "top_operators": [
+            {"operator": "aclnnFlashAttentionScoreGrad_GetFlashAttentionSrc", "total_time": 520.4, "share_percent": 40.0, "count": 100},
+            {"operator": "aclnnMatmul_MatMulCommon_MatMulV2", "total_time": 300.5, "share_percent": 23.0, "count": 100},
+        ]
+    }), encoding="utf-8")
+
+    output_json = tmp_path / "comparison_result.json"
+    run_script("compare_profiling_runs.py",
+               "--baseline-dir", str(baseline),
+               "--comparison-dir", str(comparison),
+               "--output-json", str(output_json))
+
+    result = json.loads(output_json.read_text(encoding="utf-8"))
+    assert result["comparison_available"] is True

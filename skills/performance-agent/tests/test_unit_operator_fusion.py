@@ -65,3 +65,28 @@ def test_fusion_no_hotspot(tmp_path: Path):
 
     result = json.loads(output_json.read_text(encoding="utf-8"))
     assert result["fusion_analysis_available"] is False
+
+
+def test_fusion_with_pta_realistic_hotspot(tmp_path: Path):
+    """Test fusion detection with realistic PTA aclnn* operator names from pro_data."""
+    hotspot_json = tmp_path / "hotspot.json"
+    hotspot_json.write_text(json.dumps({
+        "top_operators": [
+            {"operator": "aclnnFlashAttentionScore_GetFlashAttentionSrc", "share_percent": 25.0, "count": 224},
+            {"operator": "aclnnFlashAttentionScoreGrad_GetFlashAttentionSrc", "share_percent": 18.0, "count": 226},
+            {"operator": "aclnnMatmul_MatMulCommon_MatMulV2", "share_percent": 15.0, "count": 4786},
+            {"operator": "aclnnMul_MulAiCore_Mul", "share_percent": 10.0, "count": 11104},
+            {"operator": "aclnnSilu_SiluAiCore_Silu", "share_percent": 5.0, "count": 224},
+        ]
+    }), encoding="utf-8")
+
+    output_json = tmp_path / "fusion.json"
+    run_script("analyze_operator_fusion.py",
+               "--hotspot-json", str(hotspot_json),
+               "--output-json", str(output_json))
+
+    result = json.loads(output_json.read_text(encoding="utf-8"))
+    assert result["fusion_analysis_available"] is True
+    assert result["total_fusion_candidates"] >= 1
+    types = [o["type"] for o in result["opportunities"]]
+    assert "flash_attention" in types

@@ -12,6 +12,10 @@ from typing import Optional
 from perf_common import load_csv_rows, load_optional_json, write_json
 
 
+# Maximum trace_view.json size to load (500 MB)
+_MAX_TRACE_SIZE_BYTES = 500 * 1024 * 1024
+
+
 # Patterns that indicate unnecessary host-device synchronization.
 SYNC_INDUCING_PATTERNS = {
     "tensor.item": ["item", "cpu()", "numpy"],
@@ -352,7 +356,17 @@ def main() -> int:
     if args.trace_view_json:
         trace_path = Path(args.trace_view_json)
         if trace_path.exists():
-            trace_data = load_optional_json(args.trace_view_json)
+            file_size = trace_path.stat().st_size
+            if file_size > _MAX_TRACE_SIZE_BYTES:
+                import sys
+                print(
+                    f"Warning: trace_view.json is {file_size / (1024**3):.1f} GB, "
+                    f"exceeds {_MAX_TRACE_SIZE_BYTES / (1024**2):.0f} MB limit. "
+                    f"Skipping trace view analysis.",
+                    file=sys.stderr,
+                )
+            else:
+                trace_data = load_optional_json(args.trace_view_json)
 
     kernel_csv = Path(args.kernel_details_csv) if args.kernel_details_csv else None
 
